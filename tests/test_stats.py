@@ -25,6 +25,16 @@ def test_unique_visitors_via_header(monkeypatch, tmp_path):
     assert resp.json()["visitors"] == 2
 
 
+def test_unique_visitors_via_x_real_ip(monkeypatch, tmp_path):
+    client = _get_client(monkeypatch, tmp_path)
+    resp = client.get("/stats", headers={"X-Real-IP": "1.2.3.4"})
+    assert resp.json()["visitors"] == 1
+    resp = client.get("/stats", headers={"X-Real-IP": "1.2.3.4"})
+    assert resp.json()["visitors"] == 1
+    resp = client.get("/stats", headers={"X-Real-IP": "5.6.7.8"})
+    assert resp.json()["visitors"] == 2
+
+
 def test_visitors_fallback_client_host(monkeypatch, tmp_path):
     client = _get_client(monkeypatch, tmp_path)
     resp = client.get("/stats")

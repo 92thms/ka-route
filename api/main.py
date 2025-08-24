@@ -92,8 +92,16 @@ def _anonymise_ip(ip: str) -> str:
 
 
 def _get_client_ip(request: Request) -> Optional[str]:
-    if xff := request.headers.get("X-Forwarded-For"):
-        return xff.split(",")[0].strip()
+    for header in (
+        "X-Forwarded-For",
+        "X-Real-IP",
+        "CF-Connecting-IP",
+        "True-Client-IP",
+    ):
+        if value := request.headers.get(header):
+            if header == "X-Forwarded-For":
+                value = value.split(",")[0]
+            return value.strip()
     if request.client:
         return request.client.host
     return None
