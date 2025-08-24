@@ -2,6 +2,19 @@
 
 Klanavo durchsucht eBay Kleinanzeigen entlang beliebiger Routen und zeigt die Treffer direkt auf einer Karte.
 
+## Disclaimer – Pure Vibe Coding™
+
+Dieses Repository ist das Ergebnis von 100% ungefiltertem **Vibe-Coding**.  
+Das bedeutet: keinerlei Fachwissen, keinerlei Architektur, und absolut null Garantie, dass hier irgendwas sinnvoll, nützlich oder gar sicher ist.
+
+- Ich habe **keine Ahnung**, was ich tue.  
+- Wenn es funktioniert: Wunder.  
+
+Dieses Repo ist eher eine Kunstinstallation als ein Software-Projekt.  
+Benutzung geschieht auf **eigene Gefahr**
+
+Aber hey, vielleicht läuft’s ja trotzdem. ¯\_(ツ)_/¯
+
 ## Funktionen
 - Routenplanung und Anzeige der Inserate auf einer Karte
 - Preisfilter, Gruppierung und Sortierung der Ergebnisse
