@@ -91,6 +91,14 @@ def _anonymise_ip(ip: str) -> str:
     return hashlib.sha256(ip.encode("utf-8")).hexdigest()
 
 
+def _get_client_ip(request: Request) -> Optional[str]:
+    if xff := request.headers.get("X-Forwarded-For"):
+        return xff.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return None
+
+
 @app.middleware("http")
 async def _rate_limit(request: Request, call_next) -> Response:
     """Delay requests so that at most one is handled per second."""
@@ -350,8 +358,9 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
 
     _stats["searches_saved"] += 1
     _stats["listings_found"] += len(results)
-    if request.client:
-        _stats["visitors"].add(_anonymise_ip(request.client.host))
+    ip = _get_client_ip(request)
+    if ip:
+        _stats["visitors"].add(_anonymise_ip(ip))
     _persist_stats()
 
     return {"route": coords, "listings": results}
@@ -360,8 +369,9 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
 @app.get("/stats")
 @app.get("/api/stats")
 def stats(request: Request) -> dict[str, int]:
-    if request.client:
-        _stats["visitors"].add(_anonymise_ip(request.client.host))
+    ip = _get_client_ip(request)
+    if ip:
+        _stats["visitors"].add(_anonymise_ip(ip))
         _persist_stats()
     return {
         "searches_saved": _stats["searches_saved"],
