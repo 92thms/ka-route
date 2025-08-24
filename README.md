@@ -1,4 +1,4 @@
-# Klanavo
+# Klanavo - Demo unter [https://klanavo.zneb.to](https://klanavo.zneb.to)
 
 Klanavo durchsucht eBay Kleinanzeigen entlang beliebiger Routen und zeigt die Treffer direkt auf einer Karte.
 
