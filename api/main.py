@@ -359,7 +359,10 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
 
 @app.get("/stats")
 @app.get("/api/stats")
-def stats() -> dict[str, int]:
+def stats(request: Request) -> dict[str, int]:
+    if request.client:
+        _stats["visitors"].add(_anonymise_ip(request.client.host))
+        _persist_stats()
     return {
         "searches_saved": _stats["searches_saved"],
         "listings_found": _stats["listings_found"],
