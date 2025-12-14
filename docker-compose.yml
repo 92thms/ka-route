@@ -5,7 +5,7 @@ services:
       dockerfile: ops/Dockerfile
     container_name: klanavo
     ports:
-      - "8401:80"
+      - "8101:80"
     restart: unless-stopped
     shm_size: "1g"
     ipc: host

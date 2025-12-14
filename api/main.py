@@ -12,8 +12,6 @@ import json
 import hashlib
 
 from pydantic import BaseModel
-import inspect
-
 import os
 import socket
 import ipaddress
@@ -21,6 +19,7 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request, Response
 import httpx
+from scraper_http import get_inserate_http, close_http_client
 
 
 # Add the local Kleinanzeigen scraper to the import path
@@ -45,11 +44,12 @@ RATE_LIMIT_SECONDS = 1.0
 _last_request: float = 0.0
 _rate_lock = asyncio.Lock()
 
-# Global cache for reverse geocoded postal codes
-_plz_cache: dict[str, str | None] = {}
+# Global cache for reverse geocoded postal codes (plz, city)
+_plz_cache: dict[str, tuple[str | None, str | None]] = {}
 
 # Simple analytics storage; allow custom path via env variable
 _STATS_FILE = Path(os.environ.get("STATS_FILE", "/data/stats.json"))
+USE_PLAYWRIGHT = os.environ.get("USE_PLAYWRIGHT", "0").lower() not in {"0", "false", "no", ""}
 
 
 def _get_allowed_hosts() -> set[str]:
@@ -91,6 +91,50 @@ def _anonymise_ip(ip: str) -> str:
     return hashlib.sha256(ip.encode("utf-8")).hexdigest()
 
 
+async def _fetch_listings(
+    query: str | None,
+    location: str | None,
+    radius: int,
+    min_price: Optional[int],
+    max_price: Optional[int],
+    category: Optional[int],
+    page_count: int = 1,
+) -> list[dict]:
+    """Prefer HTTP scraping; fall back to Playwright when enabled and available."""
+    last_error: HTTPException | None = None
+    try:
+        return await get_inserate_http(
+            query=query,
+            location=location,
+            radius=radius,
+            min_price=min_price,
+            max_price=max_price,
+            category_id=category,
+            page_count=page_count,
+        )
+    except HTTPException as exc:
+        last_error = exc
+    except Exception as exc:  # pragma: no cover - defensive
+        last_error = HTTPException(status_code=500, detail=str(exc))
+
+    if USE_PLAYWRIGHT and browser_manager is not None:
+        return await get_inserate_klaz(
+            browser_manager=browser_manager,
+            query=query,
+            location=location,
+            radius=radius,
+            min_price=min_price,
+            max_price=max_price,
+            category_id=category,
+            page_count=page_count,
+        )
+
+    if last_error:
+        raise last_error
+
+    raise HTTPException(status_code=503, detail="Browser not initialised")
+
+
 def _get_client_ip(request: Request) -> Optional[str]:
     for header in (
         "X-Forwarded-For",
@@ -122,10 +166,11 @@ async def _rate_limit(request: Request, call_next) -> Response:
 
 @app.on_event("startup")
 async def _startup() -> None:
-    """Initialise the Playwright browser on application start."""
+    """Initialise shared resources on application start."""
     global browser_manager
-    browser_manager = PlaywrightManager()
-    await browser_manager.start()
+    if USE_PLAYWRIGHT:
+        browser_manager = PlaywrightManager()
+        await browser_manager.start()
 
 
 @app.on_event("shutdown")
@@ -133,6 +178,7 @@ async def _shutdown() -> None:  # pragma: no cover - defensive programming
     """Close the Playwright browser when the application shuts down."""
     if browser_manager is not None:
         await browser_manager.close()
+    await close_http_client()
 
 
 @app.get("/health")
@@ -174,34 +220,17 @@ async def inserate(
         A dictionary with a ``data`` key containing the scraped classifieds.
     """
 
-    try:
-        sig = inspect.signature(get_inserate_klaz)
-        params = sig.parameters
+    listings = await _fetch_listings(
+        query=query,
+        location=location,
+        radius=radius,
+        min_price=min_price,
+        max_price=max_price,
+        category=category,
+        page_count=page_count,
+    )
 
-        kwargs = {}
-        if "browser_manager" in params:
-            if browser_manager is None:  # pragma: no cover - should not happen
-                raise HTTPException(status_code=503, detail="Browser not initialised")
-            kwargs["browser_manager"] = browser_manager
-
-        kwargs["query"] = query
-        kwargs["location"] = location
-        if "radius" in params:
-            kwargs["radius"] = radius
-        if "min_price" in params and min_price is not None:
-            kwargs["min_price"] = min_price
-        if "max_price" in params and max_price is not None:
-            kwargs["max_price"] = max_price
-        if "category_id" in params and category is not None:
-            kwargs["category_id"] = category
-        if "page_count" in params:
-            kwargs["page_count"] = page_count
-
-        results = await get_inserate_klaz(**kwargs)
-    except Exception as exc:  # pragma: no cover - defensive programming
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    return {"data": results}
+    return {"data": listings}
 
 
 class RouteSearchRequest(BaseModel):
@@ -271,11 +300,12 @@ def _sample_route(coords: list[list[float]], step_m: float) -> list[list[float]]
     return samples
 
 
-async def _reverse_plz(client: httpx.AsyncClient, api_key: str, lat: float, lon: float) -> str | None:
+async def _reverse_plz(client: httpx.AsyncClient, api_key: str, lat: float, lon: float) -> tuple[str | None, str | None]:
     key = f"{lat:.3f}|{lon:.3f}"
     if key in _plz_cache:
         return _plz_cache[key]
     plz: str | None = None
+    city: str | None = None
     try:
         resp = await client.get(
             "https://api.openrouteservice.org/geocode/reverse",
@@ -284,11 +314,9 @@ async def _reverse_plz(client: httpx.AsyncClient, api_key: str, lat: float, lon:
         )
         if resp.status_code == 200:
             data = resp.json()
-            plz = (
-                data.get("features", [{}])[0]
-                .get("properties", {})
-                .get("postalcode")
-            )
+            props = data.get("features", [{}])[0].get("properties", {})
+            plz = props.get("postalcode")
+            city = props.get("locality") or props.get("region") or props.get("name")
     except Exception:
         pass
     if not plz:
@@ -307,16 +335,22 @@ async def _reverse_plz(client: httpx.AsyncClient, api_key: str, lat: float, lon:
             if resp.status_code == 200:
                 j = resp.json()
                 plz = j.get("address", {}).get("postcode")
+                city = (
+                    j.get("address", {}).get("city")
+                    or j.get("address", {}).get("town")
+                    or j.get("address", {}).get("village")
+                    or j.get("address", {}).get("state")
+                )
         except Exception:
             pass
-    _plz_cache[key] = plz
-    return plz
+    _plz_cache[key] = (plz, city)
+    return plz, city
 
 
 @app.post("/route-search")
 @app.post("/api/route-search")
 async def route_search(req: RouteSearchRequest, request: Request) -> dict:
-    if browser_manager is None:  # pragma: no cover - should not happen
+    if USE_PLAYWRIGHT and browser_manager is None:  # pragma: no cover - defensive
         raise HTTPException(status_code=503, detail="Browser not initialised")
     api_key = os.getenv("ORS_API_KEY")
     if not api_key:
@@ -336,23 +370,29 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
 
         samples = _sample_route(coords, req.step * 1000)
         plzs: set[str] = set()
+        plz_coords: dict[str, tuple[float, float]] = {}
+        plz_labels: dict[str, str] = {}
         for lon, lat in samples:
-            plz = await _reverse_plz(client, api_key, lat, lon)
+            plz, city = await _reverse_plz(client, api_key, lat, lon)
             if plz:
                 plzs.add(plz)
+                plz_coords.setdefault(plz, (lat, lon))
+                if city:
+                    plz_labels.setdefault(plz, f"{plz} {city}")
+                else:
+                    plz_labels.setdefault(plz, plz)
 
         results: list[dict] = []
         seen: set[str] = set()
         for plz in plzs:
             try:
-                items = await get_inserate_klaz(
-                    browser_manager=browser_manager,
+                items = await _fetch_listings(
                     query=req.query,
                     location=plz,
                     radius=req.radius,
                     min_price=req.min_price,
                     max_price=req.max_price,
-                    category_id=req.category,
+                    category=req.category,
                 )
             except Exception:
                 continue
@@ -362,6 +402,10 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
                     continue
                 seen.add(url)
                 it["plz"] = plz
+                if label := plz_labels.get(plz):
+                    it["label"] = label
+                if coords_plz := plz_coords.get(plz):
+                    it["lat"], it["lon"] = coords_plz
                 results.append(it)
 
     _stats["searches_saved"] += 1
