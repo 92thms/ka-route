@@ -25,10 +25,10 @@ if(MAINTENANCE_MODE && MAINTENANCE_KEY){
   appEl.classList.remove("hidden");
 }
 
-const radiusOptions=[5,10,20];
+const radiusOptions=[0,5,20];
 const stepOptions=[5,10,20];
-let rKm = 10;
-let stepKm = 10;
+let rKm = radiusOptions[0];
+let stepKm = stepOptions[0];
 // Alle Nominatim-Anfragen werden über einen Proxy geleitet,
 // daher sind keine speziellen Header mehr nötig.
 function escapeHtml(str){
@@ -53,9 +53,11 @@ const startGroup=$("#grpStart"), zielGroup=$("#grpZiel"), queryGroup=$("#grpQuer
 const radiusInput=$("#radius"), stepInput=$("#step"), radiusVal=$("#radiusVal"), stepVal=$("#stepVal"), filterPriceMin=$("#filterPriceMin"), filterPriceMax=$("#filterPriceMax"), sortPriceBtn=$("#sortPrice"), groupBtn=$("#toggleGrouping"), analyticsBox=$("#analytics");
 const queryWarn=$("#queryWarn");
 const radiusIdx=radiusOptions.indexOf(rKm);
+radiusInput.min=0; radiusInput.max=radiusOptions.length-1; radiusInput.step=1;
 radiusInput.value=radiusIdx>=0?radiusIdx:1;
 radiusVal.textContent=radiusOptions[radiusInput.value];
 const stepIdx=stepOptions.indexOf(stepKm);
+stepInput.min=0; stepInput.max=stepOptions.length-1; stepInput.step=1;
 stepInput.value=stepIdx>=0?stepIdx:1;
 stepVal.textContent=stepOptions[stepInput.value];
 radiusInput.addEventListener('input',()=>radiusVal.textContent=radiusOptions[radiusInput.value]);
@@ -509,9 +511,51 @@ async function parseListingDetails(html){
   }
 
   // 3) Fallbacks
+  if(!cityText){
+    const metaDesc = doc.querySelector('meta[property="og:description"], meta[name="description"]')?.content || '';
+    const descMatch = metaDesc.match(/(\d{5})\s+[A-Za-zÄÖÜäöüß .'-]{1,80}/);
+    if(descMatch){
+      postal = postal || descMatch[1];
+      const parts = descMatch[0].replace(descMatch[1],'').trim().split(/\s+-\s+|-/);
+      const last = parts[parts.length-1]?.trim();
+      if(last && !/anzeige/i.test(last)){ cityText = last; }
+    }
+  }
+  if(!cityText){
+    const ogLoc = doc.querySelector('meta[property="og:locality"]')?.content || '';
+    if(ogLoc){
+      let cand = ogLoc.split('-').pop()?.trim().replace(/_/g,' ') || '';
+      if(cand && !/anzeige/i.test(cand)){ cityText = cand; }
+    }
+  }
+  if(!cityText || !postal){
+    const metaDesc = doc.querySelector('meta[property="og:description"], meta[name="description"]')?.content || '';
+    const descMatch = metaDesc.match(/(\d{5})[^-]{0,50}-\s*([A-Za-zÄÖÜäöüß .'-]{2,})/);
+    if(descMatch){
+      postal = postal || descMatch[1];
+      const cand = descMatch[2].trim();
+      if(cand && !/anzeige/i.test(cand)){ cityText = cityText || cand; }
+    }
+  }
   if(!postal){
     const m = html.match(/"(?:postalCode|postcode|zip|zipCode|zipcode)"\s*:\s*"?(\d{5})"?/i);
     if(m) postal = m[1];
+  }
+  if(!cityText){
+    // Beispiel: "78607 Baden-Württemberg - Talheim" -> Talheim (letzter Teil hinter dem Bindestrich)
+    const textSrc = doc.body?.innerText || doc.body?.textContent || html;
+    const m = textSrc.match(/\b\d{5}[^\n]{0,200}?[-–—]\s*([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß .'-]{1,})/);
+    if(m){
+      let cand=m[1].trim();
+      if(cand.includes("-")){
+        const parts=cand.split("-").map(s=>s.trim()).filter(Boolean);
+        if(parts.length) cand=parts[parts.length-1];
+      }
+      // Filter Off-Targets wie "Anzeige"
+      if(!/anzeige/i.test(cand) && cand.length>1){
+        cityText = cand;
+      }
+    }
   }
   if(!postal){
     const ctx=/(\bplz\b|postleitzahl|postal(?:code)?|adresse|address|standort|ort|stadt|gemeinde|wohnort)/i;
@@ -600,7 +644,10 @@ async function geocodeTextOnce(text){
 }
 
 async function enrichListing(it,wantDetails=true){
-  let lat=null,lon=null,price=formatPrice(it.price||""),postal=null,label=null,image=null,cityText=null,categories=null,category=null;
+  let lat=it.lat??null,lon=it.lon??null;
+  let price=formatPrice(it.price||"");
+  let postal=null,cityText=null,label=it.label||null,image=null,categories=null,category=null;
+
   if(wantDetails){
     try{
       const html=await fetchViaProxy(it.url);
@@ -614,18 +661,34 @@ async function enrichListing(it,wantDetails=true){
       if(det.categories&&det.categories.length){ category=det.categories[det.categories.length-1]; }
     }catch(e){ setStatus("Proxy/Parse-Fehler: "+e.message,true); }
   }
-  if(lat===null||lon===null){
+
+  if(!postal && it.plz){ postal = it.plz; }
+
+  if((lat===null||lon===null) && (postal || cityText)){
     if(postal){
       const g=await reversePLZ(postal);
-      lat=g.lat;lon=g.lon;label=g.display;
+      lat=g.lat;lon=g.lon;
+      if(!label) label=g.display;
     } else if(cityText){
       const g=await geocodeTextOnce(cityText+", Deutschland");
-      lat=g.lat;lon=g.lon;label=g.label;
+      lat=g.lat;lon=g.lon;
+      if(!label) label=g.label;
     }
   }
-  if(!label){
-    label = `${postal||""}${cityText?` ${cityText}`:""}`.trim();
+
+  // Fallback auf Route-Koordinaten nur wenn gar nichts anderes da ist
+  if((lat===null||lon===null) && it.lat!=null && it.lon!=null){
+    lat=it.lat; lon=it.lon;
   }
+
+  if(postal && cityText){
+    label = `${postal} ${cityText}`.trim();
+  } else if(cityText){
+    label = cityText;
+  } else if(postal){
+    label = postal;
+  }
+  if(!label && it.label){ label = it.label; }
   return {lat,lon,label,price,image,postal,categories,category};
 }
 
@@ -704,6 +767,18 @@ $("#btnRun").addEventListener("click",()=>{
   }
 });
 
+// Enter startet die Suche, wenn Felder gefüllt sind
+["start","ziel","query"].forEach(id=>{
+  const el=document.getElementById(id);
+  if(!el) return;
+  el.addEventListener("keydown",e=>{
+    if(e.key==="Enter"){
+      e.preventDefault();
+      if(!running) run();
+    }
+  });
+});
+
 async function run(){
   queryWarn.classList.add('hidden');
   const q=$("#query").value.trim();
@@ -766,19 +841,22 @@ async function run(){
       const it=items[i];
       if(abortCtrl?.signal.aborted) break;
       const info=await enrichListing(it,true);
-      if(info.lat!=null && info.lon!=null){
-        const dist=minDistToRouteMeters(info.lat,info.lon,coords);
-        if(dist/1000<=rKm){
-          const imgHtml=info.image?`<img src="${escapeHtml(info.image)}" alt="">`:"";
-          const catName=info.category||'Unbekannt';
-          const cardHtml=`${imgHtml}<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener"><strong>${escapeHtml(it.title)}</strong></a><div class="muted">${escapeHtml(info.price)} – ${escapeHtml(catName)}</div>`;
-          const label=info.label||it.plz||"?";
-          const cluster=addListingToClusters(info.lat,info.lon);
-          resultItems.push({label,cardHtml,priceVal:parsePriceVal(info.price),category:catName,clusterId:cluster.id});
-          added++;
-          renderResults();
-        }
+      const hasCoords = info.lat!=null && info.lon!=null;
+      const label=info.label||it.plz||"?";
+      const imgHtml=info.image?`<img src="${escapeHtml(info.image)}" alt="">`:"";
+      const catName=info.category||'Unbekannt';
+      const locText=label||"Unbekannt";
+      const cardHtml=`${imgHtml}<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener"><strong>${escapeHtml(it.title)}</strong></a><div class="muted">${escapeHtml(info.price)} – ${escapeHtml(catName)}<br>${escapeHtml(locText)}</div>`;
+
+      if(hasCoords){
+        const cluster=addListingToClusters(info.lat,info.lon);
+        resultItems.push({label,cardHtml,priceVal:parsePriceVal(info.price),category:catName,clusterId:cluster.id});
+      } else {
+        // Kein Geotag: trotzdem in der Liste zeigen, aber ohne Karte/Cluster
+        resultItems.push({label,cardHtml,priceVal:parsePriceVal(info.price),category:catName,clusterId:null});
       }
+      added++;
+      renderResults();
       setProgress(Math.min(100, Math.round(((i+1)/items.length)*100)));
     }
     setStatus("Fertig.");
@@ -796,5 +874,3 @@ async function run(){
   running=false; $("#btnRun").textContent="Route berechnen & suchen"; abortCtrl=null;
   updateAnalytics();
 }
-
-

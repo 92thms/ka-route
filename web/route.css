@@ -21,13 +21,14 @@
     margin:0 auto;
   }
 
-  /* App Header */
-  .app-header{
-    padding:20px 12px;
-    background:var(--card);
-    border-bottom:2px solid var(--accent);
-    text-align:center;
-  }
+/* App Header */
+.app-header{
+  padding:20px 12px;
+  background:var(--card);
+  border-bottom:2px solid var(--accent);
+  text-align:center;
+  border-radius:0;
+}
   .app-header h1{
     margin:0 0 6px;
     font-size:22px;
@@ -48,9 +49,14 @@
   }
 
   /* Header / Inputs */
-  header{
-    display:flex;flex-wrap:wrap;gap:10px;padding:12px;background:var(--card);
-    border:1px solid var(--border);border-radius:10px
+header{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  padding:12px;
+  background:var(--card);
+  border:none;
+  border-radius:0 0 10px 10px;
   }
   header .group{display:flex;flex-direction:column;gap:4px;flex:1;min-width:240px}
   #grpSettings,#grpRun{flex:1 1 100%}

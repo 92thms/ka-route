@@ -5,12 +5,12 @@
 <title>klanavo</title>
 <link rel="icon" type="image/png" href="favico.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
-<link rel="stylesheet" href="route.css">
+<link rel="stylesheet" href="route.css?v=4">
 
 <body>
 <div class="app-header">
   <h1><img src="klanavo.png" alt="klanavo" class="logo"> klanavo</h1>
-  <p>Plane eine Route und entdecke Kleinanzeigen Inserate entlang der Strecke</br> Kontakt / Feedback / Probleme bitte über Telegram <a href="https://t.me/+MZ4FoLzpqDlkNWYy" target="_blank" rel="noopener" title="Telegram">
+  <p>Nur zu Testzwecken – am besten selbst hosten und mit eigenen API-Keys betreiben.</br> Kontakt / Feedback / Probleme bitte über Telegram <a href="https://t.me/+MZ4FoLzpqDlkNWYy" target="_blank" rel="noopener" title="Telegram">
     <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" fill="currentColor">
       <path d="M9.04 15.56 8.86 21c.4 0 .58-.17.8-.38l3.3-3.16 6.84 5.02c1.25.69 2.16.33 2.5-1.16L24 3.6 24 .74c-.38-.97-1.38-.68-2.3-.34L1.32 9.5c-1 .4-.99.95-.18 1.2l6.35 1.98 14.7-9.28-13.15 12.16z"/>
     </svg>
@@ -40,18 +40,18 @@
     <input id="query" placeholder="Suchbegriff" required>
     <div id="queryWarn" class="warn hidden">Bitte Suchbegriff eingeben.</div>
   </div>
-  <div class="group" id="grpSettings">
+  <div class="group hidden" id="grpSettings">
     <details>
-      <summary><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="icon"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"></path><circle cx="12" cy="12" r="3"></circle></svg> Einstellungen <span class="muted">– coming soon</span></summary>
-      <div class="hidden">
-        <label for="radius" title="Umkreis der Suche">Suchradius: <span id="radiusVal"></span> km</label>
+      <summary><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="icon"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"></path><circle cx="12" cy="12" r="3"></circle></svg> Einstellungen</summary>
+      <div>
+        <label for="radius" title="Umkreis der Suche">Suchradius entlang der Route: <span id="radiusVal"></span> km</label>
         <input id="radius" type="range" min="0" max="2" step="1" value="1" list="radiusTicks" title="Umkreis der Suche">
         <datalist id="radiusTicks">
-          <option value="0" label="5"></option>
-          <option value="1" label="10"></option>
+          <option value="0" label="0"></option>
+          <option value="1" label="5"></option>
           <option value="2" label="20"></option>
         </datalist>
-        <label for="step" title="Abstand zwischen Wegpunkten">Punktabstand: <span id="stepVal"></span> km</label>
+        <label for="step" title="Abstand zwischen Wegpunkten">Punktabstand entlang der Route: <span id="stepVal"></span> km</label>
         <input id="step" type="range" min="0" max="2" step="1" value="1" list="stepTicks" title="Abstand zwischen Wegpunkten">
         <datalist id="stepTicks">
           <option value="0" label="5"></option>
@@ -118,7 +118,7 @@
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script src="config.js"></script>
-<script src="route.js"></script>
+<script src="route.js?v=4"></script>
 
 </body>
 </html>
