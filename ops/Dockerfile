@@ -1,5 +1,5 @@
-# Playwright-Python-Image: enthält Browser + System-Dependencies
-FROM mcr.microsoft.com/playwright/python:v1.54.0
+# Schlankes Python-Image, Browser werden nicht benötigt
+FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
@@ -43,4 +43,3 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD wget -qO- http://127.0.0
 
 # Start
 CMD ["/usr/bin/supervisord","-c","/etc/supervisor/conf.d/supervisord.conf","-n"]
-

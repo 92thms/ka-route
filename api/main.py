@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
-import sys
 import time
+import asyncio
 from pathlib import Path
 from typing import Optional, Any
 import math
@@ -22,34 +21,18 @@ import httpx
 from scraper_http import get_inserate_http, close_http_client
 
 
-# Add the local Kleinanzeigen scraper to the import path
-SCRAPER_DIR = Path(__file__).resolve().parent / "ebay-kleinanzeigen-api"
-sys.path.insert(0, str(SCRAPER_DIR))
-
-from scrapers.inserate import get_inserate_klaz  # type: ignore  # noqa: E402
-from utils.browser import PlaywrightManager  # type: ignore  # noqa: E402
-
-
 app = FastAPI()
 """FastAPI application used to expose the scraper."""
-
-# Global Playwright browser so that it is not started for every request.  Starting
-# and stopping Playwright is quite expensive, therefore we keep a single browser
-# instance alive for the lifetime of the application and hand out new pages per
-# request.
-browser_manager: PlaywrightManager | None = None
 
 # Simple global rate limiter: process at most one request per second.
 RATE_LIMIT_SECONDS = 1.0
 _last_request: float = 0.0
-_rate_lock = asyncio.Lock()
 
 # Global cache for reverse geocoded postal codes (plz, city)
 _plz_cache: dict[str, tuple[str | None, str | None]] = {}
 
 # Simple analytics storage; allow custom path via env variable
 _STATS_FILE = Path(os.environ.get("STATS_FILE", "/data/stats.json"))
-USE_PLAYWRIGHT = os.environ.get("USE_PLAYWRIGHT", "0").lower() not in {"0", "false", "no", ""}
 
 
 def _get_allowed_hosts() -> set[str]:
@@ -100,39 +83,16 @@ async def _fetch_listings(
     category: Optional[int],
     page_count: int = 1,
 ) -> list[dict]:
-    """Prefer HTTP scraping; fall back to Playwright when enabled and available."""
-    last_error: HTTPException | None = None
-    try:
-        return await get_inserate_http(
-            query=query,
-            location=location,
-            radius=radius,
-            min_price=min_price,
-            max_price=max_price,
-            category_id=category,
-            page_count=page_count,
-        )
-    except HTTPException as exc:
-        last_error = exc
-    except Exception as exc:  # pragma: no cover - defensive
-        last_error = HTTPException(status_code=500, detail=str(exc))
-
-    if USE_PLAYWRIGHT and browser_manager is not None:
-        return await get_inserate_klaz(
-            browser_manager=browser_manager,
-            query=query,
-            location=location,
-            radius=radius,
-            min_price=min_price,
-            max_price=max_price,
-            category_id=category,
-            page_count=page_count,
-        )
-
-    if last_error:
-        raise last_error
-
-    raise HTTPException(status_code=503, detail="Browser not initialised")
+    """HTTP-only scraping."""
+    return await get_inserate_http(
+        query=query,
+        location=location,
+        radius=radius,
+        min_price=min_price,
+        max_price=max_price,
+        category_id=category,
+        page_count=page_count,
+    )
 
 
 def _get_client_ip(request: Request) -> Optional[str]:
@@ -155,29 +115,22 @@ def _get_client_ip(request: Request) -> Optional[str]:
 async def _rate_limit(request: Request, call_next) -> Response:
     """Delay requests so that at most one is handled per second."""
     global _last_request
-    async with _rate_lock:
-        now = time.monotonic()
-        wait = RATE_LIMIT_SECONDS - (now - _last_request)
-        if wait > 0:
-            await asyncio.sleep(wait)
-        _last_request = time.monotonic()
+    now = time.monotonic()
+    wait = RATE_LIMIT_SECONDS - (now - _last_request)
+    if wait > 0:
+        await asyncio.sleep(wait)
+    _last_request = time.monotonic()
     return await call_next(request)
 
 
 @app.on_event("startup")
 async def _startup() -> None:
     """Initialise shared resources on application start."""
-    global browser_manager
-    if USE_PLAYWRIGHT:
-        browser_manager = PlaywrightManager()
-        await browser_manager.start()
 
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:  # pragma: no cover - defensive programming
-    """Close the Playwright browser when the application shuts down."""
-    if browser_manager is not None:
-        await browser_manager.close()
+    """Close the shared HTTP client when the application shuts down."""
     await close_http_client()
 
 
@@ -350,8 +303,6 @@ async def _reverse_plz(client: httpx.AsyncClient, api_key: str, lat: float, lon:
 @app.post("/route-search")
 @app.post("/api/route-search")
 async def route_search(req: RouteSearchRequest, request: Request) -> dict:
-    if USE_PLAYWRIGHT and browser_manager is None:  # pragma: no cover - defensive
-        raise HTTPException(status_code=503, detail="Browser not initialised")
     api_key = os.getenv("ORS_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="ORS_API_KEY not configured")

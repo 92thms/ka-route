@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `api/` FastAPI service with Playwright-powered Kleinanzeigen scraper (entrypoint `api/main.py`); bundled upstream scraper code lives in `api/ebay-kleinanzeigen-api/`.
+- `api/` FastAPI service with HTTP-based Kleinanzeigen scraper (entrypoint `api/main.py`); bundled upstream scraper code lives in `api/ebay-kleinanzeigen-api/`.
 - `web/` static frontend (HTML/JS/CSS) served by Nginx in production; copy `web/config.js.template` to `web/config.js` when customizing endpoints or maintenance mode text.
 - `tests/` pytest suites using `fastapi.testclient` to exercise proxy and stats endpoints.
 - `ops/` container runtime assets (Dockerfile, Nginx, supervisord) and `docker-compose.yml` for local orchestration; runtime data persists under `data/` (e.g., `data/stats.json`).
@@ -15,7 +15,7 @@
   pip install -r requirements.txt
   uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
   ```
-  Docker image already includes Playwright browsers.
+  Keine Browser nötig; HTTP-Scraper läuft ohne Playwright.
 - Tests: `pytest tests` from repo root (uses TestClient; no network needed).
 
 ## Coding Style & Naming Conventions
