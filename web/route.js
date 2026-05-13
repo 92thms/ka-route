@@ -480,20 +480,19 @@ async function parseListingDetails(html){
   const doc=new DOMParser().parseFromString(html,'text/html');
   const title=doc.querySelector('meta[property="og:title"]')?.content||doc.title||null;
   let image=doc.querySelector('meta[property="og:image"]')?.content||null;
-  let postal=null, cityText=null, lat=null, lon=null;
+  let postal=null, lat=null, lon=null;
   let categories=[];
 
   // Kategorien aus Breadcrumb
   categories=[...doc.querySelectorAll('.breadcrump-link')].map(el=>el.textContent.trim()).filter(Boolean);
 
-  // 1) JSON-LD
+  // 1) JSON-LD — trusted structured source
   doc.querySelectorAll('script[type="application/ld+json"]').forEach(s=>{
     try{
       const obj=JSON.parse(s.textContent);
       const addr=obj.address||obj.itemOffered?.address||obj.offers?.seller?.address;
       if(addr){
         postal=postal||addr.postalCode||addr.postcode||addr.zip;
-        cityText=cityText||addr.addressLocality||addr.city||addr.town;
       }
       if(!image && obj.image){ image=Array.isArray(obj.image)?obj.image[0]:(typeof obj.image==='string'?obj.image:null); }
       const g=obj.geo||obj.location||obj.address?.geo;
@@ -504,8 +503,8 @@ async function parseListingDetails(html){
     }catch(_){}
   });
 
-  // 2) __INITIAL_STATE__
-  if(!postal||!cityText||lat===null||lon===null){
+  // 2) __INITIAL_STATE__ — trusted structured source
+  if(!postal||lat===null||lon===null){
     doc.querySelectorAll('script').forEach(s=>{
       const t=s.textContent||'';
       if(t.includes('__INITIAL_STATE__')){
@@ -515,7 +514,6 @@ async function parseListingDetails(html){
           const a=st?.ad?.adAddress||st?.adInfo?.address||st?.adData?.address||null;
           if(a){
             postal=postal||a.postalCode||a.postcode||a.zipCode;
-            cityText=cityText||a.city||a.town||a.addressLocality;
             const g=a.geo||a.coordinates||a.location;
             if(g){
               const la=parseFloat(g.lat||g.latitude); const lo=parseFloat(g.lon||g.lng||g.longitude);
@@ -527,67 +525,23 @@ async function parseListingDetails(html){
     });
   }
 
-  // 3) Fallbacks
-  if(!cityText){
-    const metaDesc = doc.querySelector('meta[property="og:description"], meta[name="description"]')?.content || '';
-    const descMatch = metaDesc.match(/(\d{5})\s+[A-Za-zÄÖÜäöüß .'-]{1,80}/);
-    if(descMatch){
-      postal = postal || descMatch[1];
-      const parts = descMatch[0].replace(descMatch[1],'').trim().split(/\s+-\s+|-/);
-      const last = parts[parts.length-1]?.trim();
-      if(last && !/anzeige/i.test(last)){ cityText = last; }
-    }
-  }
-  if(!cityText){
-    const ogLoc = doc.querySelector('meta[property="og:locality"]')?.content || '';
-    if(ogLoc){
-      let cand = ogLoc.split('-').pop()?.trim().replace(/_/g,' ') || '';
-      if(cand && !/anzeige/i.test(cand)){ cityText = cand; }
-    }
-  }
-  if(!cityText || !postal){
-    const metaDesc = doc.querySelector('meta[property="og:description"], meta[name="description"]')?.content || '';
-    const descMatch = metaDesc.match(/(\d{5})[^-]{0,50}-\s*([A-Za-zÄÖÜäöüß .'-]{2,})/);
-    if(descMatch){
-      postal = postal || descMatch[1];
-      const cand = descMatch[2].trim();
-      if(cand && !/anzeige/i.test(cand)){ cityText = cityText || cand; }
-    }
-  }
+  // 3) Specific meta tags for postal code (reliable, not from description text)
   if(!postal){
-    const m = html.match(/"(?:postalCode|postcode|zip|zipCode|zipcode)"\s*:\s*"?(\d{5})"?/i);
-    if(m) postal = m[1];
+    postal = doc.querySelector('meta[property="og:postal-code"]')?.content
+          || doc.querySelector('meta[name="postal-code"]')?.content
+          || null;
   }
-  if(!cityText){
-    // Beispiel: "78607 Baden-Württemberg - Talheim" -> Talheim (letzter Teil hinter dem Bindestrich)
-    const textSrc = doc.body?.innerText || doc.body?.textContent || html;
-    const m = textSrc.match(/\b\d{5}[^\n]{0,200}?[-–—]\s*([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß .'-]{1,})/);
-    if(m){
-      let cand=m[1].trim();
-      if(cand.includes("-")){
-        const parts=cand.split("-").map(s=>s.trim()).filter(Boolean);
-        if(parts.length) cand=parts[parts.length-1];
-      }
-      // Filter Off-Targets wie "Anzeige"
-      if(!/anzeige/i.test(cand) && cand.length>1){
-        cityText = cand;
-      }
+
+  // 4) Known Kleinanzeigen location element — extract leading 5-digit PLZ only
+  if(!postal){
+    const locEl=doc.querySelector('#viewad-locality, [data-testid="ad-location"], .addetailslist--detail--value');
+    if(locEl){
+      const m=locEl.textContent.match(/\b(\d{5})\b/);
+      if(m) postal=m[1];
     }
   }
-  if(!postal){
-    const ctx=/(\bplz\b|postleitzahl|postal(?:code)?|adresse|address|standort|ort|stadt|gemeinde|wohnort)/i;
-    const matches=[...html.matchAll(/\b(\d{5})\b/g)].map(m=>({code:m[1],idx:m.index||0}));
-    const filtered=matches.filter(({code,idx})=>{
-      const left=Math.max(0,idx-100), right=Math.min(html.length,idx+100);
-      const win=html.slice(left,right);
-      const prev=html[idx-1]||'', next=html[idx+5]||'';
-      const neighborsBad=/[-A-Za-z]/.test(prev)||/[-A-Za-z]/.test(next);
-      const looksLikePrice=new RegExp(code+'[\\s\\/,\\.-]*€').test(win);
-      const hasContext=ctx.test(win);
-      return !neighborsBad && !looksLikePrice && hasContext;
-    });
-    if(filtered.length) postal=filtered[0].code;
-  }
+
+  // 5) lat/lon raw regex fallback (for listings that embed coordinates but not via JSON-LD)
   if(lat===null||lon===null){
     const lm=html.match(/"(?:latitude|lat)"\s*:\s*([0-9.+-]+)/i);
     const lom=html.match(/"(?:longitude|lon|lng)"\s*:\s*([0-9.+-]+)/i);
@@ -612,6 +566,7 @@ async function parseListingDetails(html){
 const _plzLabelCache={};
 async function reversePLZ(postal){
   if(_plzLabelCache[postal]) return _plzLabelCache[postal];
+  let orsLat=null, orsLon=null;
   try{
     const url=`/ors/geocode/search/structured?postalcode=${encodeURIComponent(postal)}&country=DE&size=1`;
     const res=await fetch(url,{headers:{"Accept":"application/json"},signal:abortCtrl?.signal});
@@ -619,12 +574,15 @@ async function reversePLZ(postal){
       const j=await res.json();
       const f=j?.features?.[0];
       if(f){
-        const lat=f.geometry.coordinates[1], lon=f.geometry.coordinates[0];
+        orsLat=f.geometry.coordinates[1]; orsLon=f.geometry.coordinates[0];
         const props=f.properties||{};
-        const rawCity=props.locality||props.region||props.county||props.name||"";
-        const city=/^(deutschland|germany)$/i.test(rawCity)?"":rawCity;
-        const r={lat,lon,display:city?`${postal} ${city}`:postal};
-        _plzLabelCache[postal]=r; return r;
+        const rawCity=props.locality||props.region||props.county||"";
+        const badCity=/^(deutschland|germany|\d+)$/i.test(rawCity.trim());
+        if(rawCity && !badCity){
+          const r={lat:orsLat,lon:orsLon,display:`${postal} ${rawCity}`};
+          _plzLabelCache[postal]=r; return r;
+        }
+        // ORS had coords but no useful city — fall through to Nominatim for city name
       }
     }
   }catch(_){ }
@@ -635,12 +593,13 @@ async function reversePLZ(postal){
     if(j&&j[0]){
       const a=j[0].address||{};
       const city=cityFromAddr(a);
-      const r={lat:+j[0].lat,lon:+j[0].lon,display:`${postal}${city?` ${city}`:''}`};
+      const lat=orsLat??+j[0].lat, lon=orsLon??+j[0].lon;
+      const r={lat,lon,display:city?`${postal} ${city}`:postal};
       _plzLabelCache[postal]=r; return r;
     }
   }catch(_){ }
 
-  const result={lat:null,lon:null,display:postal};
+  const result={lat:orsLat,lon:orsLon,display:postal};
   _plzLabelCache[postal]=result;
   return result;
 }
@@ -844,7 +803,7 @@ async function run(){
     if(routeLayer) map.removeLayer(routeLayer);
     if(coords.length){
       routeLayer=L.polyline(coords.map(c=>[c[1],c[0]]),{weight:5,color:'#1e66f5'}).addTo(map);
-      map.fitBounds(routeLayer.getBounds());
+      map.fitBounds(routeLayer.getBounds(),{padding:[32,32],maxZoom:11});
       const startLatLng=[coords[0][1],coords[0][0]];
       const zielLatLng=[coords[coords.length-1][1],coords[coords.length-1][0]];
       L.marker(startLatLng,{icon:blueIcon}).addTo(resultMarkers).bindPopup("Start");
