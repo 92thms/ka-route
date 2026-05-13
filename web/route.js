@@ -64,34 +64,13 @@ radiusInput.addEventListener('input',()=>radiusVal.textContent=radiusOptions[rad
 stepInput.addEventListener('input',()=>stepVal.textContent=stepOptions[stepInput.value]);
 $("#query").addEventListener('input',()=>queryWarn.classList.add('hidden'));
 
-async function fetchRateLimits(){
-    try{
-      const [geoRes,dirRes]=await Promise.all([
-        fetch(`/ors/geocode/autocomplete?text=Berlin&boundary.country=DE&size=1`,{headers:{"Accept":"application/json"}}),
-        fetch(`/ors/v2/directions/driving-car?start=8.681495,49.41461&end=8.687872,49.420318`,{headers:{"Accept":"application/json"}})
-      ]);
-      return{
-        geocode:{limit:geoRes.headers.get("x-ratelimit-limit"),remaining:geoRes.headers.get("x-ratelimit-remaining")},
-        directions:{limit:dirRes.headers.get("x-ratelimit-limit"),remaining:dirRes.headers.get("x-ratelimit-remaining")}
-      };
-    }catch(_){
-      return{};
-    }
-  }
-
   async function updateAnalytics(){
     try{
-      const [stats,limits]=await Promise.all([
-        fetch('/api/stats').then(r=>r.json()).catch(()=>({})),
-        fetchRateLimits()
-      ]);
+      const stats=await fetch('/api/stats').then(r=>r.json()).catch(()=>({}));
       const parts=[];
       if(stats.searches_saved!=null) parts.push(`gestartete Suchen: ${stats.searches_saved}`);
       if(stats.listings_found!=null) parts.push(`gecrawlte Inserate: ${stats.listings_found}`);
       if(stats.visitors!=null) parts.push(`Besucher gesamt: ${stats.visitors}`);
-      if(limits.geocode&&limits.geocode.limit&&limits.geocode.remaining&&limits.directions&&limits.directions.limit&&limits.directions.remaining){
-        parts.push(`API-Limits Geocode ${limits.geocode.remaining}/${limits.geocode.limit}, Directions ${limits.directions.remaining}/${limits.directions.limit}`);
-      }
       analyticsBox.textContent=parts.join(' · ');
     }catch(_){
       analyticsBox.textContent='';
