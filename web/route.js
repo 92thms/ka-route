@@ -625,10 +625,13 @@ async function geocodeTextOnce(text){
 }
 
 async function enrichListing(it,wantDetails=true){
-  // Start with route-point coords as fallback only
-  let lat=null, lon=null;
+  // Route sample-point coords are ALWAYS available from the backend — use them as default
+  let lat = (it.lat != null) ? it.lat : null;
+  let lon = (it.lon != null) ? it.lon : null;
   let price=formatPrice(it.price||"");
-  let postal=null, label=null, image=null, categories=null, category=null;
+  let postal=it.plz||null;
+  let label=it.label||null;
+  let image=null, categories=null, category=null;
 
   if(wantDetails){
     try{
@@ -637,30 +640,25 @@ async function enrichListing(it,wantDetails=true){
       if(det.title) it.title=det.title;
       if(det.price) price=det.price;
       if(det.image) image=det.image;
-      // Use listing's actual postal code (more accurate than route point's plz)
       if(det.postal) postal=det.postal;
-      // Use exact coordinates from listing JSON-LD if available
+      // Exact JSON-LD coords override route sample point when available
       if(det.lat!=null && det.lon!=null){ lat=det.lat; lon=det.lon; }
       categories=det.categories;
       if(det.categories&&det.categories.length){ category=det.categories[det.categories.length-1]; }
-    }catch(e){ setStatus("Proxy/Parse-Fehler: "+e.message,true); }
+    }catch(_){}
   }
 
-  // Fall back to route-point postal only if listing HTML had none
-  if(!postal && it.plz) postal=it.plz;
-
-  // Geocode postal → reliable city label (Nominatim) + coords if not from JSON-LD
+  // Resolve city name from postal code; update coords only if we still have none
   if(postal){
-    const g=await reversePLZ(postal);
-    if(lat===null) lat=g.lat;
-    if(lon===null) lon=g.lon;
-    label=g.display; // Always prefer Nominatim city — avoids corrupted scraped text
+    try{
+      const g=await reversePLZ(postal);
+      label=g.display;
+      if(lat==null && g.lat!=null) lat=g.lat;
+      if(lon==null && g.lon!=null) lon=g.lon;
+    }catch(_){}
   }
 
-  // Absolute last resort: use route sample-point coordinates
-  if(lat===null && it.lat!=null) lat=it.lat;
-  if(lon===null && it.lon!=null) lon=it.lon;
-  if(!label) label=it.label||it.plz||null;
+  if(!label) label=postal||"?";
 
   return {lat,lon,label,price,image,postal,categories,category};
 }
