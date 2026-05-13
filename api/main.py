@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional, Any
 import math
@@ -21,7 +22,13 @@ import httpx
 from scraper_http import get_inserate_http, close_http_client
 
 
-app = FastAPI()
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    yield
+    await close_http_client()
+
+
+app = FastAPI(lifespan=_lifespan)
 """FastAPI application used to expose the scraper."""
 
 # Simple global rate limiter: process at most one request per second.
@@ -122,16 +129,6 @@ async def _rate_limit(request: Request, call_next) -> Response:
     _last_request = time.monotonic()
     return await call_next(request)
 
-
-@app.on_event("startup")
-async def _startup() -> None:
-    """Initialise shared resources on application start."""
-
-
-@app.on_event("shutdown")
-async def _shutdown() -> None:  # pragma: no cover - defensive programming
-    """Close the shared HTTP client when the application shuts down."""
-    await close_http_client()
 
 
 @app.get("/health")
@@ -236,7 +233,9 @@ async def _geocode_text(client: httpx.AsyncClient, api_key: str, text: str) -> t
 
 
 def _sample_route(coords: list[list[float]], step_m: float) -> list[list[float]]:
-    samples: list[list[float]] = []
+    if not coords:
+        return []
+    samples: list[list[float]] = [coords[0]]
     acc = 0.0
     prev = coords[0]
     for cur in coords[1:]:
@@ -247,9 +246,9 @@ def _sample_route(coords: list[list[float]], step_m: float) -> list[list[float]]
         if acc >= step_m:
             samples.append(cur)
             acc = 0.0
-            prev = cur
-        else:
-            prev = cur
+        prev = cur
+    if samples[-1] is not coords[-1]:
+        samples.append(coords[-1])
     return samples
 
 
