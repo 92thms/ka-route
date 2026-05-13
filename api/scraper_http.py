@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import re
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 
 import httpx
 from bs4 import BeautifulSoup
@@ -72,7 +72,7 @@ def build_search_url(
         min_price_str = str(min_price) if min_price is not None else ""
         max_price_str = str(max_price) if max_price is not None else ""
         if location:
-            location_slug = location.replace(" ", "-")
+            location_slug = quote(location.replace(" ", "-"), safe="-")
             if category_id is not None:
                 search_path = (
                     f"/s-{location_slug}/preis:{min_price_str}:{max_price_str}/c{category_id}/seite:{page}"
@@ -90,7 +90,7 @@ def build_search_url(
                 search_path = f"/s-preis:{min_price_str}:{max_price_str}/seite:{page}"
     else:
         if location:
-            location_slug = location.replace(" ", "-")
+            location_slug = quote(location.replace(" ", "-"), safe="-")
             if category_id is not None:
                 search_path = f"/s-{location_slug}/c{category_id}/seite:{page}"
             else:

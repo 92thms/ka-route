@@ -703,52 +703,6 @@ const blueIcon  =makeSvgIcon('#6a8fff');
 const redIcon   =makeSvgIcon('#f87171');
 const orangeIcon=makeSvgIcon('#fb923c');
 
-// ---------- ROBUSTER MOBILE-FETCH FÜR /api/inserate ----------
-async function fetchApiInserate(q, plz, rKm) {
-  const params=new URLSearchParams({query:q,location:plz,radius:rKm});
-  const paramStr=params.toString();
-  const tries=[
-    `${window.location.origin}/api/inserate?${paramStr}`,
-    `/api/inserate?${paramStr}`
-  ];
-
-  async function tryOnce(url, useMode) {
-    const ctrl = new AbortController();
-    const t = setTimeout(()=>ctrl.abort(), 10000);
-    let onAbort;
-    if(abortCtrl){
-      onAbort=()=>ctrl.abort();
-      abortCtrl.signal.addEventListener('abort', onAbort);
-    }
-    try{
-      const resp = await fetch(url, {
-        method: "GET",
-        headers: { "Accept":"application/json" },
-        cache: "no-store",
-        credentials: "omit",
-        ...(useMode ? { mode: "same-origin" } : {}),
-        signal: ctrl.signal
-      });
-      clearTimeout(t);
-      if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      return await resp.json();
-    }catch(e){
-      clearTimeout(t);
-      throw e;
-    }finally{
-      if(abortCtrl && onAbort) abortCtrl.signal.removeEventListener('abort', onAbort);
-    }
-  }
-
-  for(const url of tries){
-    for(const useMode of [true,false]){
-      try{ return await tryOnce(url,useMode); }catch(_){}
-    }
-  }
-  await new Promise(r=>setTimeout(r,300));
-  return tryOnce(tries[1], false);
-}
-
 // ---------- Start/Stop ----------
 let running=false;
 let runCounter=0;
@@ -858,7 +812,6 @@ async function run(){
         const cluster=addListingToClusters(info.lat,info.lon);
         resultItems.push({label,cardHtml,priceVal:parsePriceVal(info.price),category:catName,clusterId:cluster.id});
       } else {
-        console.error('No coords for listing — backend sent lat='+it.lat+' lon='+it.lon+' | after enrich lat='+info.lat+' lon='+info.lon+' | url='+it.url);
         resultItems.push({label,cardHtml,priceVal:parsePriceVal(info.price),category:catName,clusterId:null});
       }
       added++;

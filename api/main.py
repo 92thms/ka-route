@@ -29,18 +29,25 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=_lifespan)
-"""FastAPI application used to expose the scraper."""
 
-# Simple global rate limiter: process at most one request per second.
-RATE_LIMIT_SECONDS = 1.0
-_last_request: float = 0.0
+# Per-IP rate limit: each client may send at most one request per second.
+_ip_rate: dict[str, float] = {}  # ip -> monotonic time when next request is allowed
+_rate_lock = asyncio.Lock()
+IP_RATE_INTERVAL = 1.0
 
 # Global cache for reverse geocoded postal codes (plz, city)
 _plz_cache: dict[str, tuple[str | None, str | None]] = {}
 
 # Simple analytics storage; allow custom path via env variable
 _STATS_FILE = Path(os.environ.get("STATS_FILE", "/data/stats.json"))
+_stats_lock = asyncio.Lock()
 
+# ORS paths the frontend is allowed to reach through the proxy.
+_ALLOWED_ORS_PATHS = frozenset({
+    "geocode/autocomplete",
+    "geocode/search",
+    "geocode/search/structured",
+})
 
 def _get_allowed_hosts() -> set[str]:
     hosts = os.getenv(
@@ -120,13 +127,20 @@ def _get_client_ip(request: Request) -> Optional[str]:
 
 @app.middleware("http")
 async def _rate_limit(request: Request, call_next) -> Response:
-    """Delay requests so that at most one is handled per second."""
-    global _last_request
-    now = time.monotonic()
-    wait = RATE_LIMIT_SECONDS - (now - _last_request)
+    """Per-IP rate limiter: at most one request per second per client."""
+    ip = _get_client_ip(request) or "unknown"
+    wait = 0.0
+    async with _rate_lock:
+        now = time.monotonic()
+        # Evict stale entries older than 60 s to keep memory bounded.
+        stale = [k for k, v in _ip_rate.items() if v < now - 60]
+        for k in stale:
+            del _ip_rate[k]
+        next_allowed = _ip_rate.get(ip, 0.0)
+        wait = max(0.0, next_allowed - now)
+        _ip_rate[ip] = max(now, next_allowed) + IP_RATE_INTERVAL
     if wait > 0:
         await asyncio.sleep(wait)
-    _last_request = time.monotonic()
     return await call_next(request)
 
 
@@ -360,11 +374,12 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
                     it["lat"], it["lon"] = coords_plz
                 results.append(it)
 
-    _stats["searches_saved"] += 1
-    _stats["listings_found"] += len(results)
-    ip = _get_client_ip(request)
-    if ip:
-        _stats["visitors"].add(_anonymise_ip(ip))
+    async with _stats_lock:
+        _stats["searches_saved"] += 1
+        _stats["listings_found"] += len(results)
+        ip = _get_client_ip(request)
+        if ip:
+            _stats["visitors"].add(_anonymise_ip(ip))
     _persist_stats()
 
     resp: dict = {"route": coords, "listings": results}
@@ -375,16 +390,19 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
 
 @app.get("/stats")
 @app.get("/api/stats")
-def stats(request: Request) -> dict[str, int]:
+async def stats(request: Request) -> dict[str, int]:
     ip = _get_client_ip(request)
+    async with _stats_lock:
+        if ip:
+            _stats["visitors"].add(_anonymise_ip(ip))
+        result = {
+            "searches_saved": _stats["searches_saved"],
+            "listings_found": _stats["listings_found"],
+            "visitors": len(_stats["visitors"]),
+        }
     if ip:
-        _stats["visitors"].add(_anonymise_ip(ip))
         _persist_stats()
-    return {
-        "searches_saved": _stats["searches_saved"],
-        "listings_found": _stats["listings_found"],
-        "visitors": len(_stats["visitors"]),
-    }
+    return result
 
 
 @app.get("/proxy")
@@ -442,27 +460,27 @@ async def proxy(u: str) -> Response:
     return Response(content=resp.content, status_code=resp.status_code, media_type=content_type)
 
 
-@app.api_route("/ors/{path:path}", methods=["GET", "POST"])
+@app.get("/ors/{path:path}")
 async def ors_proxy(path: str, request: Request) -> Response:
-    """Proxy requests to the OpenRouteService API using a server-side API key."""
+    """Proxy geocoding requests to ORS using the server-side API key.
+
+    Only the geocoding endpoints used by the frontend are allowed; routing
+    and other ORS features are blocked to prevent API-key abuse.
+    """
+    if path not in _ALLOWED_ORS_PATHS:
+        raise HTTPException(status_code=403, detail="endpoint not allowed")
 
     api_key = os.getenv("ORS_API_KEY")
     if not api_key:  # pragma: no cover - configuration issue
         raise HTTPException(status_code=500, detail="ORS_API_KEY not configured")
 
     url = f"https://api.openrouteservice.org/{path}"
-    headers = {"Authorization": api_key}
-    if ct := request.headers.get("content-type"):
-        headers["Content-Type"] = ct
-
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.request(
-                request.method,
+            resp = await client.get(
                 url,
                 params=dict(request.query_params),
-                content=await request.body(),
-                headers=headers,
+                headers={"Authorization": api_key},
             )
     except Exception as exc:  # pragma: no cover - network issues
         raise HTTPException(status_code=502, detail=str(exc)) from exc
