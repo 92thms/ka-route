@@ -1,14 +1,10 @@
 services:
   klanavo:
-    build:
-      context: .              # <— Projekt-Root als Kontext
-      dockerfile: ops/Dockerfile
+    image: ghcr.io/92thms/ka-route:latest
     container_name: klanavo
     ports:
       - "8401:80"
     restart: unless-stopped
-    shm_size: "1g"
-    ipc: host
     environment:
       ORS_API_KEY: ${ORS_API_KEY}
       MAINTENANCE_MODE: ${MAINTENANCE_MODE:-0}
