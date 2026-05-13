@@ -95,7 +95,7 @@ def build_search_url(
     params: dict[str, str] = {}
     if query:
         params["keywords"] = query
-    if location and not (min_price or max_price):
+    if location:
         params["locationStr"] = location
     if radius:
         params["radius"] = str(radius)
@@ -119,7 +119,11 @@ def _parse_ads(html: str) -> list[dict[str, Any]]:
         href = article.get("data-href")
         if not adid or not href:
             continue
-        title_el = article.select_one("h2.text-module-begin a.ellipsis")
+        title_el = (
+            article.select_one("h2.text-module-begin a.ellipsis")
+            or article.select_one("h2.text-module-begin a")
+            or article.select_one("h2 a")
+        )
         price_el = article.select_one("p.aditem-main--middle--price-shipping--price")
         desc_el = article.select_one("p.aditem-main--middle--description")
         title_text = title_el.get_text(strip=True) if title_el else ""
