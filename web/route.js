@@ -121,12 +121,15 @@ function ensureGroup(loc){
   groups.set(key, wrap);
   return wrap;
 }
+let lastRenderedIdx = 0;
+
 function clearResults(){
   const r=resultsBox;
   r.querySelectorAll('.groupbox').forEach(el=>el.remove());
   resultGallery.innerHTML='';
   resultMarkers.clearLayers();markerClusters.length=0;activeCluster=null;
   groups.clear();
+  lastRenderedIdx=0;
 }
 function addResultGalleryGroup(loc, cardHtml, clusterId){
   const box=ensureGroup(loc);
@@ -182,10 +185,35 @@ function updateSortButtons(){
   sortPriceBtn.innerHTML=ICONS.euro+(sortField==='price'?(sortDir===1?ICONS.arrowUp:ICONS.arrowDown):'');
 }
 
+function appendNewResults(){
+  const min=parsePriceInput(filterPriceMin.value.trim());
+  const max=parsePriceInput(filterPriceMax.value.trim());
+  const newItems=resultItems.slice(lastRenderedIdx);
+  lastRenderedIdx=resultItems.length;
+  newItems.forEach(it=>{
+    if(activeCluster!==null && it.clusterId!==activeCluster) return;
+    if(min!==null && it.priceVal<min) return;
+    if(max!==null && it.priceVal>max) return;
+    if(groupMode===GROUP_NONE){
+      resultGallery.classList.remove('hidden');
+      const item=document.createElement('div');
+      item.className='gallery-item';
+      item.innerHTML=it.cardHtml;
+      if(it.clusterId!=null) item.dataset.cluster=it.clusterId;
+      resultGallery.appendChild(item);
+    }else{
+      resultGallery.classList.add('hidden');
+      const key=groupMode===GROUP_LOCATION?it.label:(it.category||'Unbekannt');
+      addResultGalleryGroup(key,it.cardHtml,it.clusterId);
+    }
+  });
+}
+
 function renderResults(){
   resultsBox.querySelectorAll('.groupbox').forEach(el=>el.remove());
   groups.clear();
   resultGallery.innerHTML='';
+  lastRenderedIdx=resultItems.length;
   let arr=resultItems;
   if(activeCluster===null){
     const min=parsePriceInput(filterPriceMin.value.trim());
@@ -593,9 +621,9 @@ async function reversePLZ(postal){
       if(f){
         const lat=f.geometry.coordinates[1], lon=f.geometry.coordinates[0];
         const props=f.properties||{};
-        const city=props.locality||props.region||props.name||"";
-        if(city && !/deutschland/i.test(city)){
-          const r={lat,lon,display:`${postal}${city?` ${city}`:""}`};
+        const city=props.locality||props.region||props.county||"";
+        if(city && !/^(deutschland|germany)$/i.test(city)){
+          const r={lat,lon,display:`${postal} ${city}`};
           _plzLabelCache[postal]=r; return r;
         }
       }
@@ -845,7 +873,7 @@ async function run(){
         resultItems.push({label,cardHtml,priceVal:parsePriceVal(info.price),category:catName,clusterId:null});
       }
       added++;
-      renderResults();
+      appendNewResults();
       setProgress(Math.min(100, Math.round(((i+1)/items.length)*100)));
     }
     setStatus("Fertig.");
