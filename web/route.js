@@ -652,7 +652,11 @@ async function enrichListing(it,wantDetails=true){
   if(postal){
     try{
       const g=await reversePLZ(postal);
-      label=g.display;
+      // Only replace label if reversePLZ gives a better result (has city name).
+      // Backend label like "88090 Immenstadt" is already good; g.display may be just "88090".
+      const hasCity=s=>s&&/\S+\s+\S/.test(s.trim());
+      if(hasCity(g.display) && !hasCity(label)) label=g.display;
+      else if(!label) label=g.display||postal;
       if(lat==null && g.lat!=null) lat=g.lat;
       if(lon==null && g.lon!=null) lon=g.lon;
     }catch(_){}
@@ -828,7 +832,7 @@ async function run(){
         const cluster=addListingToClusters(info.lat,info.lon);
         resultItems.push({label,cardHtml,priceVal:parsePriceVal(info.price),category:catName,clusterId:cluster.id});
       } else {
-        // Kein Geotag: trotzdem in der Liste zeigen, aber ohne Karte/Cluster
+        console.error('No coords for listing — backend sent lat='+it.lat+' lon='+it.lon+' | after enrich lat='+info.lat+' lon='+info.lon+' | url='+it.url);
         resultItems.push({label,cardHtml,priceVal:parsePriceVal(info.price),category:catName,clusterId:null});
       }
       added++;
