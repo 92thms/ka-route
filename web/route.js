@@ -560,7 +560,7 @@ async function parseListingDetails(html){
     if(pm) price=pm[1].toString().trim();
   }
 
-  return {title,postal,cityText,price:formatPrice(price),image,lat,lon,categories};
+  return {title,postal,price:formatPrice(price),image,lat,lon,categories};
 }
 
 const _plzLabelCache={};
@@ -810,6 +810,9 @@ async function run(){
       L.marker(zielLatLng,{icon:redIcon}).addTo(resultMarkers).bindPopup("Ziel");
     }
     const items=data.listings||[];
+    if(items.length===0 && data.scrape_errors?.length){
+      throw new Error(`Scraper-Fehler: ${data.scrape_errors[0].slice(0,120)}`);
+    }
     let added=0;
     resultItems.length=0;
     for(let i=0;i<items.length;i++){

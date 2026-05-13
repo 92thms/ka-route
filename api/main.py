@@ -334,6 +334,7 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
 
         results: list[dict] = []
         seen: set[str] = set()
+        scrape_errors: list[str] = []
         for plz in plzs:
             try:
                 items = await _fetch_listings(
@@ -344,7 +345,8 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
                     max_price=req.max_price,
                     category=req.category,
                 )
-            except Exception:
+            except Exception as exc:
+                scrape_errors.append(str(exc))
                 continue
             for it in items:
                 url = it.get("url")
@@ -365,7 +367,10 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
         _stats["visitors"].add(_anonymise_ip(ip))
     _persist_stats()
 
-    return {"route": coords, "listings": results}
+    resp: dict = {"route": coords, "listings": results}
+    if scrape_errors:
+        resp["scrape_errors"] = scrape_errors
+    return resp
 
 
 @app.get("/stats")
