@@ -476,6 +476,14 @@ function formatPrice(p){
 // -------- Parsing --------
 function cityFromAddr(a){return a?.city||a?.town||a?.village||a?.municipality||a?.county||'';}
 function safeParse(json){try{return JSON.parse(json);}catch(_){return null;}}
+// Validate a coordinate pair falls inside Germany (rough bbox).
+// Filters out NaN, 0, ocean placeholders, and other junk from regex fallbacks.
+function isDeCoord(la, lo){
+  return typeof la === 'number' && typeof lo === 'number'
+      && isFinite(la) && isFinite(lo)
+      && la > 47 && la < 56 && lo > 5 && lo < 16;
+}
+function isPlz(p){ return typeof p === 'string' && /^\d{5}$/.test(p); }
 async function parseListingDetails(html){
   const doc=new DOMParser().parseFromString(html,'text/html');
   const title=doc.querySelector('meta[property="og:title"]')?.content||doc.title||null;
@@ -491,14 +499,15 @@ async function parseListingDetails(html){
     try{
       const obj=JSON.parse(s.textContent);
       const addr=obj.address||obj.itemOffered?.address||obj.offers?.seller?.address;
-      if(addr){
-        postal=postal||addr.postalCode||addr.postcode||addr.zip;
+      if(addr && !postal){
+        const cand=String(addr.postalCode||addr.postcode||addr.zip||'');
+        if(isPlz(cand)) postal=cand;
       }
       if(!image && obj.image){ image=Array.isArray(obj.image)?obj.image[0]:(typeof obj.image==='string'?obj.image:null); }
       const g=obj.geo||obj.location||obj.address?.geo;
       if(g){
         const la=parseFloat(g.latitude||g.lat); const lo=parseFloat(g.longitude||g.lon||g.lng);
-        if(!Number.isNaN(la)&&!Number.isNaN(lo)){ lat=lat??la; lon=lon??lo; }
+        if(isDeCoord(la,lo)){ lat=lat??la; lon=lon??lo; }
       }
     }catch(_){}
   });
@@ -513,11 +522,14 @@ async function parseListingDetails(html){
           const st=safeParse(t.slice(start,end+1));
           const a=st?.ad?.adAddress||st?.adInfo?.address||st?.adData?.address||null;
           if(a){
-            postal=postal||a.postalCode||a.postcode||a.zipCode;
+            if(!postal){
+              const cand=String(a.postalCode||a.postcode||a.zipCode||'');
+              if(isPlz(cand)) postal=cand;
+            }
             const g=a.geo||a.coordinates||a.location;
             if(g){
               const la=parseFloat(g.lat||g.latitude); const lo=parseFloat(g.lon||g.lng||g.longitude);
-              if(!Number.isNaN(la)&&!Number.isNaN(lo)){ lat=lat??la; lon=lon??lo; }
+              if(isDeCoord(la,lo)){ lat=lat??la; lon=lon??lo; }
             }
           }
         }
@@ -527,9 +539,10 @@ async function parseListingDetails(html){
 
   // 3) Specific meta tags for postal code (reliable, not from description text)
   if(!postal){
-    postal = doc.querySelector('meta[property="og:postal-code"]')?.content
-          || doc.querySelector('meta[name="postal-code"]')?.content
-          || null;
+    const cand = doc.querySelector('meta[property="og:postal-code"]')?.content
+              || doc.querySelector('meta[name="postal-code"]')?.content
+              || '';
+    if(isPlz(cand)) postal = cand;
   }
 
   // 4) Known Kleinanzeigen location element — extract leading 5-digit PLZ only
@@ -541,11 +554,14 @@ async function parseListingDetails(html){
     }
   }
 
-  // 5) lat/lon raw regex fallback (for listings that embed coordinates but not via JSON-LD)
+  // 5) lat/lon raw regex fallback — only if it looks like a real German coordinate
   if(lat===null||lon===null){
     const lm=html.match(/"(?:latitude|lat)"\s*:\s*([0-9.+-]+)/i);
     const lom=html.match(/"(?:longitude|lon|lng)"\s*:\s*([0-9.+-]+)/i);
-    if(lm&&lom){ lat=parseFloat(lm[1]); lon=parseFloat(lom[1]); }
+    if(lm&&lom){
+      const la=parseFloat(lm[1]), lo=parseFloat(lom[1]);
+      if(isDeCoord(la,lo)){ lat=la; lon=lo; }
+    }
   }
 
   // Preis
@@ -625,12 +641,16 @@ async function geocodeTextOnce(text){
 }
 
 async function enrichListing(it,wantDetails=true){
-  // Route sample-point coords are ALWAYS available from the backend — use them as default
-  let lat = (it.lat != null) ? it.lat : null;
-  let lon = (it.lon != null) ? it.lon : null;
-  let price=formatPrice(it.price||"");
-  let postal=it.plz||null;
-  let label=it.label||null;
+  // Backend always provides route-sample-point coords; keep them as the safety net.
+  const baseLat = isDeCoord(it.lat, it.lon) ? it.lat : null;
+  const baseLon = isDeCoord(it.lat, it.lon) ? it.lon : null;
+  const baseLabel = it.label || null;
+  const basePostal = isPlz(it.plz) ? it.plz : null;
+
+  let lat = baseLat, lon = baseLon;
+  let postal = basePostal;
+  let label = baseLabel;
+  let price = formatPrice(it.price||"");
   let image=null, categories=null, category=null;
 
   if(wantDetails){
@@ -640,29 +660,28 @@ async function enrichListing(it,wantDetails=true){
       if(det.title) it.title=det.title;
       if(det.price) price=det.price;
       if(det.image) image=det.image;
-      if(det.postal) postal=det.postal;
-      // Exact JSON-LD coords override route sample point when available
-      if(det.lat!=null && det.lon!=null){ lat=det.lat; lon=det.lon; }
+      if(isPlz(det.postal)) postal=det.postal;
+      // Override route-point coords only when listing has real (Germany-valid) coords.
+      if(isDeCoord(det.lat, det.lon)){ lat=det.lat; lon=det.lon; }
       categories=det.categories;
       if(det.categories&&det.categories.length){ category=det.categories[det.categories.length-1]; }
     }catch(_){}
   }
 
-  // Resolve city name from postal code; update coords only if we still have none
+  // Resolve city name from postal code; only upgrade label when we get a real city.
   if(postal){
     try{
       const g=await reversePLZ(postal);
-      // Only replace label if reversePLZ gives a better result (has city name).
-      // Backend label like "88090 Immenstadt" is already good; g.display may be just "88090".
-      const hasCity=s=>s&&/\S+\s+\S/.test(s.trim());
-      if(hasCity(g.display) && !hasCity(label)) label=g.display;
-      else if(!label) label=g.display||postal;
-      if(lat==null && g.lat!=null) lat=g.lat;
-      if(lon==null && g.lon!=null) lon=g.lon;
+      const hasCity=s=>typeof s==='string' && /\S+\s+\S/.test(s.trim());
+      if(hasCity(g.display)) label=g.display;
+      else if(!hasCity(label)) label=g.display||postal;
+      if(lat==null && isDeCoord(g.lat,g.lon)){ lat=g.lat; lon=g.lon; }
     }catch(_){}
   }
 
-  if(!label) label=postal||"?";
+  // Final safety net: if anything blew away coords, fall back to backend's route point.
+  if(!isDeCoord(lat,lon)){ lat=baseLat; lon=baseLon; }
+  if(!label) label=baseLabel||postal||"?";
 
   return {lat,lon,label,price,image,postal,categories,category};
 }
