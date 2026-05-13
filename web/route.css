@@ -347,6 +347,19 @@ input[type=number] { -moz-appearance: textfield; }
   border-color: var(--accent);
   color: var(--accent);
 }
+.pin-clear {
+  align-self: flex-end;
+  padding: 6px 12px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  color: var(--accent);
+  cursor: pointer;
+  font: 600 12px/1 inherit;
+  transition: background 0.12s, color 0.12s;
+}
+.pin-clear:hover { background: var(--accent); color: #fff; }
+.pin-clear.hidden { display: none; }
 
 /* ── Grouped result boxes ───────────────────────────────────── */
 .groupbox {

@@ -69,7 +69,7 @@ const resultMarkers = L.layerGroup().addTo(map);
 // Shorthands
 const $=sel=>document.querySelector(sel);
 const startGroup=$("#grpStart"), zielGroup=$("#grpZiel"), queryGroup=$("#grpQuery"), settingsGroup=$("#grpSettings"), runGroup=$("#grpRun"), resetGroup=$("#grpReset"), mapBox=$("#map-box"), resultsBox=$("#results"), resultGallery=$("#resultGallery");
-const filterPriceMin=$("#filterPriceMin"), filterPriceMax=$("#filterPriceMax"), sortPriceBtn=$("#sortPrice"), groupBtn=$("#toggleGrouping"), analyticsBox=$("#analytics");
+const filterPriceMin=$("#filterPriceMin"), filterPriceMax=$("#filterPriceMax"), sortPriceBtn=$("#sortPrice"), groupBtn=$("#toggleGrouping"), clearPinBtn=$("#clearPinFilter"), analyticsBox=$("#analytics");
 const queryWarn=$("#queryWarn");
 $("#query").addEventListener('input',()=>queryWarn.classList.add('hidden'));
 
@@ -128,6 +128,7 @@ function clearResults(){
   r.querySelectorAll('.groupbox').forEach(el=>el.remove());
   resultGallery.innerHTML='';
   resultMarkers.clearLayers();markerClusters.length=0;activeCluster=null;
+  if(clearPinBtn) clearPinBtn.classList.add('hidden');
   groups.clear();
   lastRenderedIdx=0;
 }
@@ -149,7 +150,7 @@ let sortField='price';
 let sortDir=1; // 1=asc, -1=desc
 
 const GROUP_NONE=0, GROUP_LOCATION=1, GROUP_CATEGORY=2;
-let groupMode=GROUP_CATEGORY;
+let groupMode=GROUP_LOCATION;
 
 const ICONS={
   location:`<svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"></path><circle cx="12" cy="10" r="3"></circle></svg>`,
@@ -160,8 +161,8 @@ const ICONS={
   arrowDown:`<svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"></path><path d="m19 12-7 7-7-7"></path></svg>`
 };
 
-groupBtn.innerHTML=ICONS.ungroup;
-groupBtn.title='Gruppierung aufheben';
+groupBtn.innerHTML=ICONS.category;
+groupBtn.title='Nach Kategorie gruppieren';
 
 function parsePriceVal(str){
   const cleaned=String(str).replace(/VB/i,'').replace(/€/g,'').replace(/\u00a0/g,'').trim();
@@ -296,9 +297,9 @@ $("#btnReset").addEventListener('click', () => {
   resultsBox.classList.add("hidden");
   if(routeLayer){ map.removeLayer(routeLayer); routeLayer=null; }
   clearResults();
-  groupMode=GROUP_CATEGORY;
-  groupBtn.innerHTML=ICONS.ungroup;
-  groupBtn.title='Gruppierung aufheben';
+  groupMode=GROUP_LOCATION;
+  groupBtn.innerHTML=ICONS.category;
+  groupBtn.title='Nach Kategorie gruppieren';
   sortField='price';
   sortDir=1;
   updateSortButtons();
@@ -397,8 +398,13 @@ function highlightCluster(id){
     const cluster = markerClusters[activeCluster];
     cluster.marker.setIcon(orangeIcon);
     document.querySelectorAll(`[data-cluster="${activeCluster}"]`).forEach(el=>el.classList.add('highlight'));
+    clearPinBtn.classList.remove('hidden');
+  }else{
+    clearPinBtn.classList.add('hidden');
   }
 }
+
+clearPinBtn.addEventListener('click', () => highlightCluster(null));
 
 map.on('click', () => highlightCluster(null));
 
@@ -641,13 +647,13 @@ async function geocodeTextOnce(text){
 }
 
 async function enrichListing(it,wantDetails=true){
-  // Backend always provides route-sample-point coords; keep them as the safety net.
+  // Backend gives route-sample-point coords as last-resort fallback.
   const baseLat = isDeCoord(it.lat, it.lon) ? it.lat : null;
   const baseLon = isDeCoord(it.lat, it.lon) ? it.lon : null;
   const baseLabel = it.label || null;
   const basePostal = isPlz(it.plz) ? it.plz : null;
 
-  let lat = baseLat, lon = baseLon;
+  let lat=null, lon=null;
   let postal = basePostal;
   let label = baseLabel;
   let price = formatPrice(it.price||"");
@@ -661,25 +667,26 @@ async function enrichListing(it,wantDetails=true){
       if(det.price) price=det.price;
       if(det.image) image=det.image;
       if(isPlz(det.postal)) postal=det.postal;
-      // Override route-point coords only when listing has real (Germany-valid) coords.
+      // Best source: exact coordinates from the listing's own detail page
       if(isDeCoord(det.lat, det.lon)){ lat=det.lat; lon=det.lon; }
       categories=det.categories;
       if(det.categories&&det.categories.length){ category=det.categories[det.categories.length-1]; }
     }catch(_){}
   }
 
-  // Resolve city name from postal code; only upgrade label when we get a real city.
+  // Geocode the listing's own PLZ — gives city name and PLZ-centroid coords.
+  // Prefer these over route sample points because they reflect the actual listing location.
   if(postal){
     try{
       const g=await reversePLZ(postal);
       const hasCity=s=>typeof s==='string' && /\S+\s+\S/.test(s.trim());
       if(hasCity(g.display)) label=g.display;
       else if(!hasCity(label)) label=g.display||postal;
-      if(lat==null && isDeCoord(g.lat,g.lon)){ lat=g.lat; lon=g.lon; }
+      if(!isDeCoord(lat,lon) && isDeCoord(g.lat,g.lon)){ lat=g.lat; lon=g.lon; }
     }catch(_){}
   }
 
-  // Final safety net: if anything blew away coords, fall back to backend's route point.
+  // Last resort: route sample point so the listing at least appears on the map.
   if(!isDeCoord(lat,lon)){ lat=baseLat; lon=baseLon; }
   if(!label) label=baseLabel||postal||"?";
 
