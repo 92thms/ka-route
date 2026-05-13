@@ -25,24 +25,27 @@ if(MAINTENANCE_MODE && MAINTENANCE_KEY){
   appEl.classList.remove("hidden");
 }
 
-let rKm = 10;
-let stepKm = 10;
+let rKm = 15;
+let stepKm = 25;
 
-function setupChips(groupId, defaultVal, onChange){
-  const group=document.getElementById(groupId);
+(function setupPresets(){
+  const group = document.getElementById('presetChips');
+  const hint  = document.getElementById('presetHint');
   if(!group) return;
-  group.querySelectorAll('.chip').forEach(chip=>{
-    const v=parseInt(chip.dataset.value,10);
-    if(v===defaultVal) chip.classList.add('active');
-    chip.addEventListener('click',()=>{
-      group.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
-      chip.classList.add('active');
-      onChange(parseInt(chip.dataset.value,10));
-    });
+  function activate(chip){
+    group.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    stepKm = parseInt(chip.dataset.step, 10);
+    rKm    = parseInt(chip.dataset.radius, 10);
+    if(hint) hint.textContent = `${stepKm} km Abstand · ${rKm} km Radius`;
+  }
+  group.querySelectorAll('.preset-chip').forEach(chip=>{
+    if(parseInt(chip.dataset.step,10)===stepKm && parseInt(chip.dataset.radius,10)===rKm){
+      activate(chip);
+    }
+    chip.addEventListener('click', ()=> activate(chip));
   });
-}
-setupChips('radiusChips', rKm,   v=>{ rKm=v;   });
-setupChips('stepChips',   stepKm, v=>{ stepKm=v; });
+})();
 
 function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, s => ({

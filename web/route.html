@@ -5,7 +5,7 @@
 <title>klanavo</title>
 <link rel="icon" type="image/png" href="favico.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
-<link rel="stylesheet" href="route.css?v=5">
+<link rel="stylesheet" href="route.css?v=6">
 
 <body>
 <div class="app-header">
@@ -48,22 +48,14 @@
 
   <div class="group settings-group" id="grpSettings">
     <div class="setting-block">
-      <span class="setting-label">Suchradius pro Punkt</span>
-      <div class="chip-group" id="radiusChips">
-        <button class="chip" data-value="5">5 km</button>
-        <button class="chip" data-value="10">10 km</button>
-        <button class="chip" data-value="20">20 km</button>
-        <button class="chip" data-value="30">30 km</button>
+      <span class="setting-label">Suchtiefe</span>
+      <div class="chip-group" id="presetChips">
+        <button class="chip preset-chip" data-step="50" data-radius="10" title="Suchpunkte alle 50 km · Suchradius je 10 km">Schnell</button>
+        <button class="chip preset-chip" data-step="25" data-radius="15" title="Suchpunkte alle 25 km · Suchradius je 15 km">Standard</button>
+        <button class="chip preset-chip" data-step="10" data-radius="20" title="Suchpunkte alle 10 km · Suchradius je 20 km">Genau</button>
+        <button class="chip preset-chip" data-step="5" data-radius="30" title="Suchpunkte alle 5 km · Suchradius je 30 km">Fein</button>
       </div>
-    </div>
-    <div class="setting-block">
-      <span class="setting-label">Punktabstand entlang Route</span>
-      <div class="chip-group" id="stepChips">
-        <button class="chip" data-value="5">5 km</button>
-        <button class="chip" data-value="10">10 km</button>
-        <button class="chip" data-value="25">25 km</button>
-        <button class="chip" data-value="50">50 km</button>
-      </div>
+      <span id="presetHint" class="preset-hint"></span>
     </div>
   </div>
 
@@ -127,6 +119,6 @@
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script src="config.js"></script>
-<script src="route.js?v=5"></script>
+<script src="route.js?v=6"></script>
 </body>
 </html>

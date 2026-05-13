@@ -153,6 +153,11 @@ input[type=number] { -moz-appearance: textfield; }
   flex: 1;
   min-width: 200px;
 }
+.preset-hint {
+  font-size: 11px;
+  color: var(--text-3);
+  min-height: 14px;
+}
 .chip-group {
   display: flex;
   flex-wrap: wrap;
