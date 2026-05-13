@@ -143,7 +143,7 @@ let sortField='price';
 let sortDir=1; // 1=asc, -1=desc
 
 const GROUP_NONE=0, GROUP_LOCATION=1, GROUP_CATEGORY=2;
-let groupMode=GROUP_NONE;
+let groupMode=GROUP_CATEGORY;
 
 const ICONS={
   location:`<svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"></path><circle cx="12" cy="10" r="3"></circle></svg>`,
@@ -154,7 +154,8 @@ const ICONS={
   arrowDown:`<svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"></path><path d="m19 12-7 7-7-7"></path></svg>`
 };
 
-groupBtn.innerHTML=ICONS.location;
+groupBtn.innerHTML=ICONS.ungroup;
+groupBtn.title='Gruppierung aufheben';
 
 function parsePriceVal(str){
   const cleaned=String(str).replace(/VB/i,'').replace(/€/g,'').replace(/\u00a0/g,'').trim();
@@ -264,9 +265,9 @@ $("#btnReset").addEventListener('click', () => {
   resultsBox.classList.add("hidden");
   if(routeLayer){ map.removeLayer(routeLayer); routeLayer=null; }
   clearResults();
-  groupMode=GROUP_NONE;
-  groupBtn.innerHTML=ICONS.location;
-  groupBtn.title='Nach Ort gruppieren';
+  groupMode=GROUP_CATEGORY;
+  groupBtn.innerHTML=ICONS.ungroup;
+  groupBtn.title='Gruppierung aufheben';
   sortField='price';
   sortDir=1;
   updateSortButtons();
@@ -577,7 +578,9 @@ async function parseListingDetails(html){
   return {title,postal,cityText,price:formatPrice(price),image,lat,lon,categories};
 }
 
+const _plzLabelCache={};
 async function reversePLZ(postal){
+  if(_plzLabelCache[postal]) return _plzLabelCache[postal];
   try{
     const url=`/ors/geocode/search/structured?postalcode=${encodeURIComponent(postal)}&country=DE&size=1`;
     const res=await fetch(url,{headers:{"Accept":"application/json"},signal:abortCtrl?.signal});
@@ -589,7 +592,8 @@ async function reversePLZ(postal){
         const props=f.properties||{};
         const city=props.locality||props.region||props.name||"";
         if(city && !/deutschland/i.test(city)){
-          return {lat,lon,display:`${postal}${city?` ${city}`:""}`};
+          const r={lat,lon,display:`${postal}${city?` ${city}`:""}`};
+          _plzLabelCache[postal]=r; return r;
         }
       }
     }
@@ -601,11 +605,14 @@ async function reversePLZ(postal){
     if(j&&j[0]){
       const a=j[0].address||{};
       const city=cityFromAddr(a);
-      return {lat:+j[0].lat,lon:+j[0].lon,display:`${postal}${city?` ${city}`:''}`};
+      const r={lat:+j[0].lat,lon:+j[0].lon,display:`${postal}${city?` ${city}`:''}`};
+      _plzLabelCache[postal]=r; return r;
     }
   }catch(_){ }
 
-  return {lat:null,lon:null,display:postal};
+  const result={lat:null,lon:null,display:postal};
+  _plzLabelCache[postal]=result;
+  return result;
 }
 
 async function geocodeTextOnce(text){
@@ -629,9 +636,10 @@ async function geocodeTextOnce(text){
 }
 
 async function enrichListing(it,wantDetails=true){
-  let lat=it.lat??null,lon=it.lon??null;
+  // Start with route-point coords as fallback only
+  let lat=null, lon=null;
   let price=formatPrice(it.price||"");
-  let postal=null,cityText=null,label=it.label||null,image=null,categories=null,category=null;
+  let postal=null, label=null, image=null, categories=null, category=null;
 
   if(wantDetails){
     try{
@@ -640,48 +648,43 @@ async function enrichListing(it,wantDetails=true){
       if(det.title) it.title=det.title;
       if(det.price) price=det.price;
       if(det.image) image=det.image;
-      postal=det.postal; cityText=det.cityText;
+      // Use listing's actual postal code (more accurate than route point's plz)
+      if(det.postal) postal=det.postal;
+      // Use exact coordinates from listing JSON-LD if available
       if(det.lat!=null && det.lon!=null){ lat=det.lat; lon=det.lon; }
       categories=det.categories;
       if(det.categories&&det.categories.length){ category=det.categories[det.categories.length-1]; }
     }catch(e){ setStatus("Proxy/Parse-Fehler: "+e.message,true); }
   }
 
-  if(!postal && it.plz){ postal = it.plz; }
+  // Fall back to route-point postal only if listing HTML had none
+  if(!postal && it.plz) postal=it.plz;
 
-  if((lat===null||lon===null) && (postal || cityText)){
-    if(postal){
-      const g=await reversePLZ(postal);
-      lat=g.lat;lon=g.lon;
-      if(!label) label=g.display;
-    } else if(cityText){
-      const g=await geocodeTextOnce(cityText+", Deutschland");
-      lat=g.lat;lon=g.lon;
-      if(!label) label=g.label;
-    }
+  // Geocode postal → reliable city label (Nominatim) + coords if not from JSON-LD
+  if(postal){
+    const g=await reversePLZ(postal);
+    if(lat===null) lat=g.lat;
+    if(lon===null) lon=g.lon;
+    label=g.display; // Always prefer Nominatim city — avoids corrupted scraped text
   }
 
-  // Fallback auf Route-Koordinaten nur wenn gar nichts anderes da ist
-  if((lat===null||lon===null) && it.lat!=null && it.lon!=null){
-    lat=it.lat; lon=it.lon;
-  }
+  // Absolute last resort: use route sample-point coordinates
+  if(lat===null && it.lat!=null) lat=it.lat;
+  if(lon===null && it.lon!=null) lon=it.lon;
+  if(!label) label=it.label||it.plz||null;
 
-  if(postal && cityText){
-    label = `${postal} ${cityText}`.trim();
-  } else if(cityText){
-    label = cityText;
-  } else if(postal){
-    label = postal;
-  }
-  if(!label && it.label){ label = it.label; }
   return {lat,lon,label,price,image,postal,categories,category};
 }
 
-// Icons
-const greenIcon=L.icon({iconUrl:"https://maps.google.com/mapfiles/ms/icons/green-dot.png",iconSize:[32,32],iconAnchor:[16,32]});
-const blueIcon=L.icon({iconUrl:"https://maps.google.com/mapfiles/ms/icons/blue-dot.png",iconSize:[32,32],iconAnchor:[16,32]});
-const redIcon=L.icon({iconUrl:"https://maps.google.com/mapfiles/ms/icons/red-dot.png",iconSize:[32,32],iconAnchor:[16,32]});
-const orangeIcon=L.icon({iconUrl:"https://maps.google.com/mapfiles/ms/icons/orange-dot.png",iconSize:[32,32],iconAnchor:[16,32]});
+// SVG marker factory — no external CDN dependency
+function makeSvgIcon(color, size=28){
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 32" width="${size}" height="${size*32/24}"><path d="M12 0C7.163 0 3 4.163 3 9c0 7 9 23 9 23S21 16 21 9C21 4.163 16.837 0 12 0z" fill="${color}" stroke="rgba(0,0,0,0.25)" stroke-width="0.8"/><circle cx="12" cy="9" r="3.5" fill="white" opacity="0.9"/></svg>`;
+  return L.icon({iconUrl:'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg),iconSize:[size,size*32/24],iconAnchor:[size/2,size*32/24]});
+}
+const greenIcon =makeSvgIcon('#4ade80');
+const blueIcon  =makeSvgIcon('#6a8fff');
+const redIcon   =makeSvgIcon('#f87171');
+const orangeIcon=makeSvgIcon('#fb923c');
 
 // ---------- ROBUSTER MOBILE-FETCH FÜR /api/inserate ----------
 async function fetchApiInserate(q, plz, rKm) {
