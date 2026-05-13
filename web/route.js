@@ -621,11 +621,10 @@ async function reversePLZ(postal){
       if(f){
         const lat=f.geometry.coordinates[1], lon=f.geometry.coordinates[0];
         const props=f.properties||{};
-        const city=props.locality||props.region||props.county||"";
-        if(city && !/^(deutschland|germany)$/i.test(city)){
-          const r={lat,lon,display:`${postal} ${city}`};
-          _plzLabelCache[postal]=r; return r;
-        }
+        const rawCity=props.locality||props.region||props.county||props.name||"";
+        const city=/^(deutschland|germany)$/i.test(rawCity)?"":rawCity;
+        const r={lat,lon,display:city?`${postal} ${city}`:postal};
+        _plzLabelCache[postal]=r; return r;
       }
     }
   }catch(_){ }
