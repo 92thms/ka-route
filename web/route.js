@@ -25,12 +25,25 @@ if(MAINTENANCE_MODE && MAINTENANCE_KEY){
   appEl.classList.remove("hidden");
 }
 
-const radiusOptions=[0,5,20];
-const stepOptions=[5,10,20];
-let rKm = radiusOptions[0];
-let stepKm = stepOptions[0];
-// Alle Nominatim-Anfragen werden über einen Proxy geleitet,
-// daher sind keine speziellen Header mehr nötig.
+let rKm = 10;
+let stepKm = 10;
+
+function setupChips(groupId, defaultVal, onChange){
+  const group=document.getElementById(groupId);
+  if(!group) return;
+  group.querySelectorAll('.chip').forEach(chip=>{
+    const v=parseInt(chip.dataset.value,10);
+    if(v===defaultVal) chip.classList.add('active');
+    chip.addEventListener('click',()=>{
+      group.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
+      chip.classList.add('active');
+      onChange(parseInt(chip.dataset.value,10));
+    });
+  });
+}
+setupChips('radiusChips', rKm,   v=>{ rKm=v;   });
+setupChips('stepChips',   stepKm, v=>{ stepKm=v; });
+
 function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, s => ({
     "&": "&amp;",
@@ -43,25 +56,18 @@ function escapeHtml(str){
 
 // Map
 const map = L.map('map').setView([48.7, 9.18], 7);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+  attribution:'© <a href="https://www.openstreetmap.org/copyright">OSM</a> © <a href="https://carto.com/attributions">CARTO</a>',
+  subdomains:'abcd', maxZoom:19
+}).addTo(map);
 let routeLayer;
 const resultMarkers = L.layerGroup().addTo(map);
 
 // Shorthands
 const $=sel=>document.querySelector(sel);
 const startGroup=$("#grpStart"), zielGroup=$("#grpZiel"), queryGroup=$("#grpQuery"), settingsGroup=$("#grpSettings"), runGroup=$("#grpRun"), resetGroup=$("#grpReset"), mapBox=$("#map-box"), resultsBox=$("#results"), resultGallery=$("#resultGallery");
-const radiusInput=$("#radius"), stepInput=$("#step"), radiusVal=$("#radiusVal"), stepVal=$("#stepVal"), filterPriceMin=$("#filterPriceMin"), filterPriceMax=$("#filterPriceMax"), sortPriceBtn=$("#sortPrice"), groupBtn=$("#toggleGrouping"), analyticsBox=$("#analytics");
+const filterPriceMin=$("#filterPriceMin"), filterPriceMax=$("#filterPriceMax"), sortPriceBtn=$("#sortPrice"), groupBtn=$("#toggleGrouping"), analyticsBox=$("#analytics");
 const queryWarn=$("#queryWarn");
-const radiusIdx=radiusOptions.indexOf(rKm);
-radiusInput.min=0; radiusInput.max=radiusOptions.length-1; radiusInput.step=1;
-radiusInput.value=radiusIdx>=0?radiusIdx:1;
-radiusVal.textContent=radiusOptions[radiusInput.value];
-const stepIdx=stepOptions.indexOf(stepKm);
-stepInput.min=0; stepInput.max=stepOptions.length-1; stepInput.step=1;
-stepInput.value=stepIdx>=0?stepIdx:1;
-stepVal.textContent=stepOptions[stepInput.value];
-radiusInput.addEventListener('input',()=>radiusVal.textContent=radiusOptions[radiusInput.value]);
-stepInput.addEventListener('input',()=>stepVal.textContent=stepOptions[stepInput.value]);
 $("#query").addEventListener('input',()=>queryWarn.classList.add('hidden'));
 
   async function updateAnalytics(){
@@ -763,8 +769,6 @@ async function run(){
   const q=$("#query").value.trim();
   const startText=$("#start").value.trim();
   const zielText=$("#ziel").value.trim();
-  rKm = radiusOptions[Number(radiusInput.value)] || rKm;
-  stepKm = stepOptions[Number(stepInput.value)] || stepKm;
   if(!q){
     queryWarn.classList.remove('hidden');
     setStatus("Bitte Suchbegriff eingeben.", true);
@@ -822,10 +826,10 @@ async function run(){
       const info=await enrichListing(it,true);
       const hasCoords = info.lat!=null && info.lon!=null;
       const label=info.label||it.plz||"?";
-      const imgHtml=info.image?`<img src="${escapeHtml(info.image)}" alt="">`:"";
-      const catName=info.category||'Unbekannt';
-      const locText=label||"Unbekannt";
-      const cardHtml=`${imgHtml}<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener"><strong>${escapeHtml(it.title)}</strong></a><div class="muted">${escapeHtml(info.price)} – ${escapeHtml(catName)}<br>${escapeHtml(locText)}</div>`;
+      const imgHtml=info.image?`<img src="${escapeHtml(info.image)}" alt="" loading="lazy">`:"";
+      const catName=info.category||'';
+      const locText=label||"";
+      const cardHtml=`${imgHtml}<div class="card-body"><a href="${escapeHtml(it.url)}" target="_blank" rel="noopener"><strong>${escapeHtml(it.title)}</strong></a>${info.price?`<div class="price">${escapeHtml(info.price)}</div>`:''}<div class="meta">${catName?escapeHtml(catName):''}${catName&&locText?' · ':''}${locText?escapeHtml(locText):''}</div></div>`;
 
       if(hasCoords){
         const cluster=addListingToClusters(info.lat,info.lon);
@@ -845,7 +849,8 @@ async function run(){
   }catch(e){
     if(myRun===runCounter){
       setStatus(e.message,true);
-      setProgressState("aborted","Abgebrochen");
+      const errMsg=e.name==='AbortError'?'Abgebrochen':(e.message||'Unbekannter Fehler').slice(0,90);
+      setProgressState("aborted", errMsg);
       runGroup.classList.add("hidden");
       resetGroup.classList.remove("hidden");
     }
