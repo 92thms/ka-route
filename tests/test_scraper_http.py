@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from api.scraper_http import build_search_url, _parse_ads  # type: ignore
+from api.scraper_http import _parse_ads, build_search_url  # type: ignore
 
 
 def test_build_search_url_includes_filters():

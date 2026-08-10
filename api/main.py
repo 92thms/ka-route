@@ -2,24 +2,32 @@
 
 from __future__ import annotations
 
-import time
 import asyncio
-from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Optional, Any
-import math
-import json
 import hashlib
-
-from pydantic import BaseModel
+import hmac
+import ipaddress
+import json
+import logging
+import math
 import os
 import socket
-import ipaddress
-from urllib.parse import urlparse
+import threading
+import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
+from urllib.parse import urljoin, urlparse
 
-from fastapi import FastAPI, HTTPException, Request, Response
 import httpx
-from scraper_http import get_inserate_http, close_http_client
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from pydantic import BaseModel, Field, model_validator
+
+try:
+    from .scraper_http import close_http_client, get_inserate_http
+except ImportError:  # pragma: no cover - supports `uvicorn main:app` in api/
+    from scraper_http import close_http_client, get_inserate_http
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -31,15 +39,51 @@ async def _lifespan(app: FastAPI):
 app = FastAPI(lifespan=_lifespan)
 """FastAPI application used to expose the scraper."""
 
-# Simple global rate limiter: process at most one request per second.
-RATE_LIMIT_SECONDS = 1.0
-_last_request: float = 0.0
+
+def _maintenance_enabled() -> bool:
+    return os.getenv("MAINTENANCE_MODE", "0").lower() in {"1", "true", "yes"}
+
+
+def _maintenance_authorized(request: Request) -> bool:
+    expected_key = os.getenv("MAINTENANCE_KEY", "")
+    supplied_key = request.headers.get("X-Maintenance-Key", "")
+    return bool(expected_key) and hmac.compare_digest(supplied_key, expected_key)
+
+
+@app.middleware("http")
+async def _protect_maintenance_mode(request: Request, call_next) -> Response:
+    public_paths = {"/health", "/maintenance-auth", "/api/maintenance-auth"}
+    if (
+        _maintenance_enabled()
+        and request.url.path not in public_paths
+        and not _maintenance_authorized(request)
+    ):
+        return Response(
+            content=json.dumps({"detail": "maintenance authentication required"}),
+            status_code=401,
+            media_type="application/json",
+        )
+    return await call_next(request)
+
+
+@app.post("/maintenance-auth")
+@app.post("/api/maintenance-auth")
+async def maintenance_auth(request: Request) -> dict[str, bool]:
+    if not _maintenance_enabled() or _maintenance_authorized(request):
+        return {"authenticated": True}
+    raise HTTPException(status_code=401, detail="invalid maintenance key")
+
+# Serialize only upstream scraper calls. Health, stats and geocoding remain responsive.
+RATE_LIMIT_SECONDS = float(os.getenv("SCRAPER_RATE_LIMIT_SECONDS", "1.0"))
+_last_scrape_request: float = 0.0
+_scrape_lock = asyncio.Lock()
 
 # Global cache for reverse geocoded postal codes (plz, city)
 _plz_cache: dict[str, tuple[str | None, str | None]] = {}
 
 # Simple analytics storage; allow custom path via env variable
 _STATS_FILE = Path(os.environ.get("STATS_FILE", "/data/stats.json"))
+_stats_lock = threading.Lock()
 
 
 def _get_allowed_hosts() -> set[str]:
@@ -53,11 +97,18 @@ def _get_allowed_hosts() -> set[str]:
 def _load_stats() -> dict[str, Any]:
     if _STATS_FILE.exists():
         try:
-            data = json.loads(_STATS_FILE.read_text())
-            data["visitors"] = set(data.get("visitors", []))
-            return data
-        except Exception:
-            pass
+            data = json.loads(_STATS_FILE.read_text(encoding="utf-8"))
+            return {
+                "searches_saved": max(0, int(data.get("searches_saved", 0))),
+                "listings_found": max(0, int(data.get("listings_found", 0))),
+                "visitors": {
+                    value
+                    for value in data.get("visitors", [])
+                    if isinstance(value, str)
+                },
+            }
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            logger.warning("Could not load stats from %s: %s", _STATS_FILE, exc)
     return {"searches_saved": 0, "listings_found": 0, "visitors": set()}
 
 
@@ -72,62 +123,72 @@ def _persist_stats() -> None:
     }
     try:
         _STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _STATS_FILE.write_text(json.dumps(data))
-    except Exception:
-        pass
+        temporary_file = _STATS_FILE.with_suffix(f"{_STATS_FILE.suffix}.tmp")
+        temporary_file.write_text(json.dumps(data), encoding="utf-8")
+        temporary_file.replace(_STATS_FILE)
+    except OSError as exc:
+        logger.warning("Could not persist stats to %s: %s", _STATS_FILE, exc)
 
 
 def _anonymise_ip(ip: str) -> str:
-    return hashlib.sha256(ip.encode("utf-8")).hexdigest()
+    salt = os.getenv("STATS_HASH_SALT", "")
+    return hashlib.sha256(f"{salt}\0{ip}".encode()).hexdigest()
 
 
 async def _fetch_listings(
     query: str | None,
     location: str | None,
     radius: int,
-    min_price: Optional[int],
-    max_price: Optional[int],
-    category: Optional[int],
+    min_price: int | None,
+    max_price: int | None,
+    category: int | None,
     page_count: int = 1,
 ) -> list[dict]:
     """HTTP-only scraping."""
-    return await get_inserate_http(
-        query=query,
-        location=location,
-        radius=radius,
-        min_price=min_price,
-        max_price=max_price,
-        category_id=category,
-        page_count=page_count,
-    )
+    global _last_scrape_request
+    async with _scrape_lock:
+        wait = RATE_LIMIT_SECONDS - (time.monotonic() - _last_scrape_request)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        try:
+            return await get_inserate_http(
+                query=query,
+                location=location,
+                radius=radius,
+                min_price=min_price,
+                max_price=max_price,
+                category_id=category,
+                page_count=page_count,
+            )
+        finally:
+            _last_scrape_request = time.monotonic()
 
 
-def _get_client_ip(request: Request) -> Optional[str]:
-    for header in (
-        "X-Forwarded-For",
-        "X-Real-IP",
-        "CF-Connecting-IP",
-        "True-Client-IP",
+def _normalise_ip(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError:
+        return None
+
+
+def _get_client_ip(request: Request) -> str | None:
+    peer = request.client.host.strip() if request.client else None
+    peer_ip = _normalise_ip(peer)
+    trusted_proxies = {
+        value.strip()
+        for value in os.getenv("TRUSTED_PROXY_IPS", "127.0.0.1,::1").split(",")
+        if value.strip()
+    }
+    if (peer_ip in trusted_proxies or peer in trusted_proxies) and (
+        forwarded_ip := _normalise_ip(request.headers.get("X-Real-IP"))
     ):
-        if value := request.headers.get(header):
-            if header == "X-Forwarded-For":
-                value = value.split(",")[0]
-            return value.strip()
-    if request.client:
-        return request.client.host
-    return None
-
-
-@app.middleware("http")
-async def _rate_limit(request: Request, call_next) -> Response:
-    """Delay requests so that at most one is handled per second."""
-    global _last_request
-    now = time.monotonic()
-    wait = RATE_LIMIT_SECONDS - (now - _last_request)
-    if wait > 0:
-        await asyncio.sleep(wait)
-    _last_request = time.monotonic()
-    return await call_next(request)
+        # Nginx overwrites X-Real-IP with the connected client's address.
+        return forwarded_ip
+    if peer_ip:
+        return peer_ip
+    return peer
 
 
 
@@ -140,13 +201,13 @@ async def health() -> dict[str, str]:
 @app.get("/inserate")
 @app.get("/api/inserate")
 async def inserate(
-    query: str,
-    location: str,
-    radius: int = 10,
-    min_price: Optional[int] = None,
-    max_price: Optional[int] = None,
-    category: Optional[int] = None,
-    page_count: int = 1,
+    query: str = Query(min_length=1, max_length=100),
+    location: str = Query(pattern=r"^\d{5}$"),
+    radius: int = Query(default=10, ge=0, le=200),
+    min_price: int | None = Query(default=None, ge=0, le=100_000_000),
+    max_price: int | None = Query(default=None, ge=0, le=100_000_000),
+    category: int | None = Query(default=None, ge=0),
+    page_count: int = Query(default=1, ge=1, le=20),
 ) -> dict[str, list]:
     """Return classifieds scraped from eBay Kleinanzeigen.
 
@@ -170,6 +231,9 @@ async def inserate(
         A dictionary with a ``data`` key containing the scraped classifieds.
     """
 
+    if min_price is not None and max_price is not None and min_price > max_price:
+        raise HTTPException(status_code=422, detail="min_price must not exceed max_price")
+
     listings = await _fetch_listings(
         query=query,
         location=location,
@@ -184,14 +248,24 @@ async def inserate(
 
 
 class RouteSearchRequest(BaseModel):
-    start: str
-    ziel: str
-    radius: int = 10
-    step: int = 10
-    query: Optional[str] = None
-    min_price: Optional[int] = None
-    max_price: Optional[int] = None
-    category: Optional[int] = None
+    start: str = Field(min_length=1, max_length=200)
+    ziel: str = Field(min_length=1, max_length=200)
+    radius: int = Field(default=10, ge=0, le=200)
+    step: int = Field(default=10, ge=1, le=100)
+    query: str | None = Field(default=None, max_length=100)
+    min_price: int | None = Field(default=None, ge=0, le=100_000_000)
+    max_price: int | None = Field(default=None, ge=0, le=100_000_000)
+    category: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_price_range(self) -> RouteSearchRequest:
+        if (
+            self.min_price is not None
+            and self.max_price is not None
+            and self.min_price > self.max_price
+        ):
+            raise ValueError("min_price must not exceed max_price")
+        return self
 
 
 async def _geocode_text(client: httpx.AsyncClient, api_key: str, text: str) -> tuple[float, float]:
@@ -208,8 +282,8 @@ async def _geocode_text(client: httpx.AsyncClient, api_key: str, text: str) -> t
         if features:
             coords = features[0]["geometry"]["coordinates"]
             return coords[0], coords[1]
-    except Exception:
-        pass
+    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
+        logger.info("ORS geocoding failed for %r: %s", text, exc)
 
     try:
         resp = await client.get(
@@ -226,8 +300,8 @@ async def _geocode_text(client: httpx.AsyncClient, api_key: str, text: str) -> t
         data = resp.json()
         if data:
             return float(data[0]["lon"]), float(data[0]["lat"])
-    except Exception:
-        pass
+    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
+        logger.info("Nominatim geocoding failed for %r: %s", text, exc)
 
     raise HTTPException(status_code=502, detail="Geocoding failed")
 
@@ -235,19 +309,35 @@ async def _geocode_text(client: httpx.AsyncClient, api_key: str, text: str) -> t
 def _sample_route(coords: list[list[float]], step_m: float) -> list[list[float]]:
     if not coords:
         return []
+    if step_m <= 0:
+        raise ValueError("step_m must be positive")
     samples: list[list[float]] = [coords[0]]
-    acc = 0.0
+    distance_to_next_sample = step_m
     prev = coords[0]
     for cur in coords[1:]:
-        dx = (cur[0] - prev[0]) * 111320 * math.cos(math.radians((cur[1] + prev[1]) / 2))
-        dy = (cur[1] - prev[1]) * 110540
-        dist = math.hypot(dx, dy)
-        acc += dist
-        if acc >= step_m:
-            samples.append(cur)
-            acc = 0.0
+        segment_start = prev
+        dx = (cur[0] - segment_start[0]) * 111320 * math.cos(
+            math.radians((cur[1] + segment_start[1]) / 2)
+        )
+        dy = (cur[1] - segment_start[1]) * 110540
+        segment_distance = math.hypot(dx, dy)
+        while segment_distance >= distance_to_next_sample and segment_distance > 0:
+            ratio = distance_to_next_sample / segment_distance
+            sample = [
+                segment_start[0] + (cur[0] - segment_start[0]) * ratio,
+                segment_start[1] + (cur[1] - segment_start[1]) * ratio,
+            ]
+            samples.append(sample)
+            segment_start = sample
+            dx = (cur[0] - segment_start[0]) * 111320 * math.cos(
+                math.radians((cur[1] + segment_start[1]) / 2)
+            )
+            dy = (cur[1] - segment_start[1]) * 110540
+            segment_distance = math.hypot(dx, dy)
+            distance_to_next_sample = step_m
+        distance_to_next_sample -= segment_distance
         prev = cur
-    if samples[-1] is not coords[-1]:
+    if samples[-1] != coords[-1]:
         samples.append(coords[-1])
     return samples
 
@@ -258,19 +348,22 @@ async def _reverse_plz(client: httpx.AsyncClient, api_key: str, lat: float, lon:
         return _plz_cache[key]
     plz: str | None = None
     city: str | None = None
-    try:
-        resp = await client.get(
-            "https://api.openrouteservice.org/geocode/reverse",
-            params={"point.lat": lat, "point.lon": lon, "size": 1},
-            headers={"Authorization": api_key},
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            props = data.get("features", [{}])[0].get("properties", {})
-            plz = props.get("postalcode")
-            city = props.get("locality") or props.get("region") or props.get("name")
-    except Exception:
-        pass
+    prefer_ors = os.getenv("USE_ORS_REVERSE", "0").lower() in {"1", "true", "yes"}
+    if prefer_ors:
+        try:
+            resp = await client.get(
+                "https://api.openrouteservice.org/geocode/reverse",
+                params={"point.lat": lat, "point.lon": lon, "size": 1},
+                headers={"Authorization": api_key},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                features = data.get("features") or []
+                props = features[0].get("properties", {}) if features else {}
+                plz = props.get("postalcode")
+                city = props.get("locality") or props.get("region") or props.get("name")
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            logger.info("ORS reverse geocoding failed: %s", exc)
     if not plz:
         try:
             resp = await client.get(
@@ -285,16 +378,30 @@ async def _reverse_plz(client: httpx.AsyncClient, api_key: str, lat: float, lon:
                 headers={"User-Agent": "ka-route/1.0"},
             )
             if resp.status_code == 200:
-                j = resp.json()
-                plz = j.get("address", {}).get("postcode")
+                address = resp.json().get("address", {})
+                plz = address.get("postcode")
                 city = (
-                    j.get("address", {}).get("city")
-                    or j.get("address", {}).get("town")
-                    or j.get("address", {}).get("village")
-                    or j.get("address", {}).get("state")
+                    address.get("city")
+                    or address.get("town")
+                    or address.get("village")
+                    or address.get("state")
                 )
-        except Exception:
-            pass
+        except (httpx.HTTPError, TypeError, ValueError) as exc:
+            logger.info("Nominatim reverse geocoding failed: %s", exc)
+    if not plz and not prefer_ors:
+        try:
+            resp = await client.get(
+                "https://api.openrouteservice.org/geocode/reverse",
+                params={"point.lat": lat, "point.lon": lon, "size": 1},
+                headers={"Authorization": api_key},
+            )
+            if resp.status_code == 200:
+                features = resp.json().get("features") or []
+                props = features[0].get("properties", {}) if features else {}
+                plz = props.get("postalcode")
+                city = props.get("locality") or props.get("region") or props.get("name")
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            logger.info("ORS reverse geocoding fallback failed: %s", exc)
     _plz_cache[key] = (plz, city)
     return plz, city
 
@@ -306,26 +413,35 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
     if not api_key:
         raise HTTPException(status_code=500, detail="ORS_API_KEY not configured")
 
-    async with httpx.AsyncClient() as client:
+    timeout = httpx.Timeout(20.0, connect=10.0)
+    async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
         start_ll = await _geocode_text(client, api_key, req.start)
         ziel_ll = await _geocode_text(client, api_key, req.ziel)
-        resp = await client.post(
-            "https://api.openrouteservice.org/v2/directions/driving-car/geojson",
-            json={"coordinates": [start_ll, ziel_ll]},
-            headers={"Authorization": api_key},
-        )
-        resp.raise_for_status()
-        route = resp.json()
-        coords = route["features"][0]["geometry"]["coordinates"]
+        try:
+            route_response = await client.post(
+                "https://api.openrouteservice.org/v2/directions/driving-car/geojson",
+                json={"coordinates": [start_ll, ziel_ll]},
+                headers={"Authorization": api_key},
+            )
+            route_response.raise_for_status()
+            route = route_response.json()
+            coords = route["features"][0]["geometry"]["coordinates"]
+            if not isinstance(coords, list) or len(coords) < 2:
+                raise ValueError("route contains too few coordinates")
+        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
+            logger.warning("ORS route request failed: %s", exc)
+            raise HTTPException(status_code=502, detail="Route calculation failed") from exc
 
         samples = _sample_route(coords, req.step * 1000)
-        plzs: set[str] = set()
+        plzs: list[str] = []
+        seen_plzs: set[str] = set()
         plz_coords: dict[str, tuple[float, float]] = {}
         plz_labels: dict[str, str] = {}
         for lon, lat in samples:
             plz, city = await _reverse_plz(client, api_key, lat, lon)
-            if plz:
-                plzs.add(plz)
+            if plz and plz not in seen_plzs:
+                seen_plzs.add(plz)
+                plzs.append(plz)
                 plz_coords.setdefault(plz, (lat, lon))
                 if city:
                     plz_labels.setdefault(plz, f"{plz} {city}")
@@ -345,8 +461,9 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
                     max_price=req.max_price,
                     category=req.category,
                 )
-            except Exception as exc:
-                scrape_errors.append(str(exc))
+            except HTTPException as exc:
+                logger.warning("Scraping failed for postal code %s: %s", plz, exc)
+                scrape_errors.append(f"Search failed for postal code {plz}")
                 continue
             for it in items:
                 url = it.get("url")
@@ -360,12 +477,13 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
                     it["lat"], it["lon"] = coords_plz
                 results.append(it)
 
-    _stats["searches_saved"] += 1
-    _stats["listings_found"] += len(results)
     ip = _get_client_ip(request)
-    if ip:
-        _stats["visitors"].add(_anonymise_ip(ip))
-    _persist_stats()
+    with _stats_lock:
+        _stats["searches_saved"] += 1
+        _stats["listings_found"] += len(results)
+        if ip:
+            _stats["visitors"].add(_anonymise_ip(ip))
+        _persist_stats()
 
     resp: dict = {"route": coords, "listings": results}
     if scrape_errors:
@@ -377,41 +495,60 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
 @app.get("/api/stats")
 def stats(request: Request) -> dict[str, int]:
     ip = _get_client_ip(request)
-    if ip:
-        _stats["visitors"].add(_anonymise_ip(ip))
-        _persist_stats()
-    return {
-        "searches_saved": _stats["searches_saved"],
-        "listings_found": _stats["listings_found"],
-        "visitors": len(_stats["visitors"]),
-    }
+    with _stats_lock:
+        if ip:
+            visitor_hash = _anonymise_ip(ip)
+            if visitor_hash not in _stats["visitors"]:
+                _stats["visitors"].add(visitor_hash)
+                _persist_stats()
+        return {
+            "searches_saved": _stats["searches_saved"],
+            "listings_found": _stats["listings_found"],
+            "visitors": len(_stats["visitors"]),
+        }
+
+
+def _validate_proxy_url(url: str) -> tuple[str, int]:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=403, detail="invalid scheme")
+    if parsed.username or parsed.password:
+        raise HTTPException(status_code=403, detail="credentials not allowed")
+    host = parsed.hostname
+    if host is None or host.lower() not in _get_allowed_hosts():
+        raise HTTPException(status_code=403, detail="host not allowed")
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="invalid port") from exc
+    if port not in {80, 443}:
+        raise HTTPException(status_code=403, detail="port not allowed")
+    return host, port
+
+
+def _ensure_public_host(host: str, port: int) -> None:
+    try:
+        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        if not addresses:
+            raise OSError("host did not resolve")
+        for info in addresses:
+            if not ipaddress.ip_address(info[4][0]).is_global:
+                raise HTTPException(status_code=403, detail="invalid ip")
+    except HTTPException:
+        raise
+    except OSError as exc:  # pragma: no cover - environment-specific DNS failures
+        logger.warning("Proxy DNS lookup failed for %s: %s", host, exc)
+        raise HTTPException(status_code=502, detail="upstream DNS lookup failed") from exc
 
 
 @app.get("/proxy")
-async def proxy(u: str) -> Response:
+async def proxy(u: str = Query(max_length=2_048)) -> Response:
     """Fetch ``u`` and return the raw response body.
 
     The route acts as a lightweight HTTP proxy used by the front-end to
     bypass CORS restrictions when fetching external resources such as
     Nominatim or individual Kleinanzeigen pages.
     """
-
-    parsed = urlparse(u)
-    if parsed.scheme not in {"http", "https"}:
-        raise HTTPException(status_code=403, detail="invalid scheme")
-    host = parsed.hostname
-    if host is None or host.lower() not in _get_allowed_hosts():
-        raise HTTPException(status_code=403, detail="host not allowed")
-
-    try:
-        for info in socket.getaddrinfo(host, None):
-            ip = ipaddress.ip_address(info[4][0])
-            if ip.is_private or ip.is_loopback:
-                raise HTTPException(status_code=403, detail="invalid ip")
-    except HTTPException:
-        raise
-    except Exception as exc:  # pragma: no cover - DNS failure
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     headers = {
         "User-Agent": (
@@ -432,14 +569,43 @@ async def proxy(u: str) -> Response:
         "sec-ch-ua-platform": '"Windows"',
     }
 
+    current_url = u
+    timeout = httpx.Timeout(20.0, connect=10.0)
     try:
-        async with httpx.AsyncClient(follow_redirects=True, http2=True) as client:
-            resp = await client.get(u, headers=headers)
-    except Exception as exc:  # pragma: no cover - network issues
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        async with httpx.AsyncClient(
+            follow_redirects=False,
+            http2=True,
+            timeout=timeout,
+            trust_env=False,
+        ) as client:
+            for _ in range(4):
+                host, port = _validate_proxy_url(current_url)
+                _ensure_public_host(host, port)
+                upstream_response = await client.get(current_url, headers=headers)
+                if upstream_response.is_redirect:
+                    location = upstream_response.headers.get("location")
+                    if not location:
+                        break
+                    current_url = urljoin(current_url, location)
+                    continue
+                break
+            else:
+                raise HTTPException(status_code=502, detail="too many redirects")
+    except HTTPException:
+        raise
+    except httpx.HTTPError as exc:  # pragma: no cover - network issues
+        logger.warning("Proxy request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="upstream request failed") from exc
 
-    content_type = resp.headers.get("content-type", "text/html")
-    return Response(content=resp.content, status_code=resp.status_code, media_type=content_type)
+    max_bytes = int(os.getenv("PROXY_MAX_RESPONSE_BYTES", "5000000"))
+    if len(upstream_response.content) > max_bytes:
+        raise HTTPException(status_code=502, detail="upstream response too large")
+    content_type = upstream_response.headers.get("content-type", "text/html")
+    return Response(
+        content=upstream_response.content,
+        status_code=upstream_response.status_code,
+        headers={"Content-Type": content_type},
+    )
 
 
 @app.api_route("/ors/{path:path}", methods=["GET", "POST"])
@@ -450,22 +616,40 @@ async def ors_proxy(path: str, request: Request) -> Response:
     if not api_key:  # pragma: no cover - configuration issue
         raise HTTPException(status_code=500, detail="ORS_API_KEY not configured")
 
+    allowed_get_paths = {
+        "geocode/autocomplete",
+        "geocode/reverse",
+        "geocode/search",
+        "geocode/search/structured",
+    }
+    allowed_post_paths = {"v2/directions/driving-car/geojson"}
+    allowed_paths = allowed_get_paths if request.method == "GET" else allowed_post_paths
+    if path not in allowed_paths:
+        raise HTTPException(status_code=403, detail="ORS path not allowed")
+
     url = f"https://api.openrouteservice.org/{path}"
     headers = {"Authorization": api_key}
     if ct := request.headers.get("content-type"):
         headers["Content-Type"] = ct
 
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0, connect=10.0), trust_env=False
+        ) as client:
             resp = await client.request(
                 request.method,
                 url,
-                params=dict(request.query_params),
+                params=request.query_params.multi_items(),
                 content=await request.body(),
                 headers=headers,
             )
-    except Exception as exc:  # pragma: no cover - network issues
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:  # pragma: no cover - network issues
+        logger.warning("ORS proxy request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="ORS request failed") from exc
 
-    media_type = resp.headers.get("content-type", "application/json")
-    return Response(content=resp.content, status_code=resp.status_code, media_type=media_type)
+    content_type = resp.headers.get("content-type", "application/json")
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        headers={"Content-Type": content_type},
+    )

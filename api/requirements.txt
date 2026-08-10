@@ -1,5 +1,5 @@
-fastapi>=0.115.6
-uvicorn>=0.34.0
-python-multipart>=0.0.20
-httpx[http2]
-beautifulsoup4
+fastapi>=0.115.6,<1
+uvicorn>=0.34.0,<1
+python-multipart>=0.0.20,<1
+httpx[http2]>=0.27,<1
+beautifulsoup4>=4.12,<5
