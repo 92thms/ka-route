@@ -626,23 +626,12 @@ async function reversePLZ(postal){
           const r={lat:orsLat,lon:orsLon,display:`${postal} ${rawCity}`};
           _plzLabelCache[postal]=r; return r;
         }
-        // ORS had coords but no useful city — fall through to Nominatim for city name
       }
     }
   }catch(_){ }
 
-  try{
-    const url=`https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&countrycodes=de&postalcode=${encodeURIComponent(postal)}`;
-    const j=await fetchJsonViaProxy(url);
-    if(j&&j[0]){
-      const a=j[0].address||{};
-      const city=cityFromAddr(a);
-      const lat=orsLat??+j[0].lat, lon=orsLon??+j[0].lon;
-      const r={lat,lon,display:city?`${postal} ${city}`:postal};
-      _plzLabelCache[postal]=r; return r;
-    }
-  }catch(_){ }
-
+  // Do not bulk-query public Nominatim for every listing. ORS coordinates or
+  // no pin are preferable to rate limiting and misleading route-point pins.
   const result={lat:orsLat,lon:orsLon,display:postal};
   _plzLabelCache[postal]=result;
   return result;
@@ -697,7 +686,7 @@ async function enrichListing(it,wantDetails=true){
 
   // Geocode the listing's own PLZ — gives city name and PLZ-centroid coords.
   // Use the PLZ centroid only when the detail page has no usable coordinates.
-  if(postal){
+  if(postal && (!isDeCoord(lat,lon) || !hasListingLabel)){
     try{
       const g=await reversePLZ(postal);
       const hasCity=s=>typeof s==='string' && /\S+\s+\S/.test(s.trim());
