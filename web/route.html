@@ -5,13 +5,13 @@
 <title>klanavo</title>
 <link rel="icon" type="image/png" href="favico.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
-<link rel="stylesheet" href="route.css?v=9">
+<link rel="stylesheet" href="route.css?v=10">
 
 <body>
 <div class="app-header">
   <div class="header-inner">
-    <h1><img src="klanavo.svg" alt="klanavo" class="logo"> klanavo</h1>
-    <p class="tagline">Kleinanzeigen entlang deiner Route&ensp;·&ensp;Nur zu Testzwecken, bitte selbst hosten &amp; eigene API-Keys nutzen&ensp;
+    <h1><img src="klanavo.svg" alt="" class="logo"> klanavo</h1>
+    <p class="tagline">Route planen. Inserate einsammeln.<br><span class="tagline-note">Selbst hosten · eigene API-Keys nutzen</span>
       <a href="https://t.me/+MZ4FoLzpqDlkNWYy" target="_blank" rel="noopener" title="Telegram">
         <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" fill="currentColor">
           <path d="M9.04 15.56 8.86 21c.4 0 .58-.17.8-.38l3.3-3.16 6.84 5.02c1.25.69 2.16.33 2.5-1.16L24 3.6 24 .74c-.38-.97-1.38-.68-2.3-.34L1.32 9.5c-1 .4-.99.95-.18 1.2l6.35 1.98 14.7-9.28-13.15 12.16z"/>
@@ -52,8 +52,6 @@
       <div class="chip-group" id="presetChips">
         <button class="chip preset-chip" data-step="50" data-radius="10" title="Suchpunkte alle 50 km · Suchradius je 10 km">Schnell</button>
         <button class="chip preset-chip" data-step="25" data-radius="15" title="Suchpunkte alle 25 km · Suchradius je 15 km">Standard</button>
-        <button class="chip preset-chip" data-step="10" data-radius="20" title="Suchpunkte alle 10 km · Suchradius je 20 km">Genau</button>
-        <button class="chip preset-chip" data-step="5" data-radius="30" title="Suchpunkte alle 5 km · Suchradius je 30 km">Fein</button>
       </div>
       <span id="presetHint" class="preset-hint"></span>
     </div>
