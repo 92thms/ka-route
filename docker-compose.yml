@@ -1,6 +1,6 @@
 services:
   klanavo:
-    image: ghcr.io/92thms/ka-route:latest
+    image: ghcr.io/92thms/kleinanzeigen-route-scraper:latest
     container_name: klanavo
     ports:
       - "8401:80"

@@ -86,7 +86,7 @@ Der Monitor prüft, ob weiterhin Inserate sowie Titel, URLs, Preise und Standort
 
 ## Updates
 
-Das Docker-Image wird bei jedem Push auf `main` automatisch gebaut und als `ghcr.io/92thms/ka-route:latest` veröffentlicht. Auf dem Server reicht dann:
+Das Docker-Image wird bei jedem Push auf `main` automatisch gebaut und als `ghcr.io/92thms/kleinanzeigen-route-scraper:latest` veröffentlicht. Auf dem Server reicht dann:
 
 ```bash
 git pull --ff-only origin main
@@ -94,7 +94,7 @@ docker compose pull
 docker compose up -d --force-recreate
 ```
 
-Damit das funktioniert, muss das Paket auf GitHub unter *Packages → ka-route → Package settings* auf **Public** gestellt sein — oder man loggt sich mit `docker login ghcr.io` am Server ein.
+Damit das funktioniert, muss das Paket auf GitHub unter *Packages → kleinanzeigen-route-scraper → Package settings* auf **Public** gestellt sein — oder man loggt sich mit `docker login ghcr.io` am Server ein.
 
 ## Projektstruktur
 

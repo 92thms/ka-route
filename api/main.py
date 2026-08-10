@@ -310,7 +310,7 @@ async def _geocode_text(client: httpx.AsyncClient, api_key: str, text: str) -> t
                 "limit": 1,
                 "countrycodes": "de",
             },
-            headers={"User-Agent": "ka-route/1.0"},
+            headers={"User-Agent": "kleinanzeigen-route-scraper/1.0"},
         )
         resp.raise_for_status()
         data = resp.json()
@@ -408,7 +408,9 @@ async def _reverse_plz(client: httpx.AsyncClient, api_key: str, lat: float, lon:
                         "zoom": 10,
                         "addressdetails": 1,
                     },
-                    headers={"User-Agent": "ka-route/1.0 (self-hosted)"},
+                    headers={
+                        "User-Agent": "kleinanzeigen-route-scraper/1.0 (self-hosted)"
+                    },
                 )
                 if response.status_code == 200:
                     address = response.json().get("address", {})
