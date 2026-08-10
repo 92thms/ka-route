@@ -113,8 +113,15 @@ def build_search_url(
 
 
 def _strip_price(raw: str) -> str:
-    cleaned = re.sub(r"[^\d]", "", raw or "")
-    return cleaned
+    """Return the listing price without accidentally appending shipping costs."""
+    normalized = " ".join((raw or "").replace("\xa0", " ").split())
+    match = re.search(
+        r"(?P<amount>\d+(?:[. ]\d{3})*(?:,\d{1,2})?)\s*€",
+        normalized,
+    )
+    if not match:
+        return ""
+    return match.group("amount").replace(".", "").replace(" ", "")
 
 
 def _parse_location(raw: str) -> tuple[str | None, str | None]:

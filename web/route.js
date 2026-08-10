@@ -526,7 +526,7 @@ async function parseListingDetails(html){
   const doc=new DOMParser().parseFromString(html,'text/html');
   const title=doc.querySelector('meta[property="og:title"]')?.content||doc.title||null;
   let image=doc.querySelector('meta[property="og:image"]')?.content||null;
-  let postal=null, locationLabel=null, lat=null, lon=null;
+  let postal=null, locationLabel=null, lat=null, lon=null, price=null;
   let categories=[];
 
   // Kategorien aus Breadcrumb
@@ -547,6 +547,14 @@ async function parseListingDetails(html){
         if(isPlz(cand)) postal=cand;
       }
       if(!image && obj.image){ image=Array.isArray(obj.image)?obj.image[0]:(typeof obj.image==='string'?obj.image:null); }
+      const entries=Array.isArray(obj)?obj:[obj,...(Array.isArray(obj?.['@graph'])?obj['@graph']:[])];
+      for(const entry of entries){
+        const offer=Array.isArray(entry?.offers)?entry.offers[0]:entry?.offers;
+        const amount=offer?.price ?? entry?.price;
+        if(price===null && amount!==undefined && amount!==null && String(amount).trim()){
+          price=String(amount).trim();
+        }
+      }
       const g=obj.geo||obj.location||obj.address?.geo;
       if(g){
         const la=parseFloat(g.latitude||g.lat); const lo=parseFloat(g.longitude||g.lon||g.lng);
@@ -611,19 +619,18 @@ async function parseListingDetails(html){
     }
   }
 
-  // Preis
-  let price=null;
-  let vb=html.match(/id=['"]viewad-price['"][^>]*>\s*([^<]*VB[^<]*)</i);
-  if(vb){
-    price=vb[1].replace(/\s+/g,' ').trim();
-  } else {
-    let pm= html.match(/"price":"([^"]+)"/i)
-          ||html.match(/<meta[^>]+property=['"]product:price:amount['"][^>]*content=['"]([^'"]+)['"]/i)
-          ||html.match(/([0-9][0-9\., ]* ?€)/);
-    if(pm) price=pm[1].toString().trim();
+  // Prefer explicitly marked product prices. Never use the first arbitrary
+  // Euro amount from the page: that is often the shipping charge.
+  const metaPrice=doc.querySelector('meta[property="product:price:amount"]')?.content;
+  if(metaPrice) price=metaPrice.trim();
+  if(price===null){
+    const priceEl=doc.querySelector('#viewad-price, [data-testid="ad-price"]');
+    const rawPrice=priceEl?.textContent?.replace(/\s+/g,' ').trim()||'';
+    const mainPrice=rawPrice.match(/\d+(?:[. ]\d{3})*(?:,\d{1,2})?\s*€(?:\s*VB)?|\bVB\b/i);
+    if(mainPrice) price=mainPrice[0];
   }
 
-  return {title,postal,locationLabel,price:formatPrice(price),image,lat,lon,categories};
+  return {title,postal,locationLabel,price:price===null?null:formatPrice(price),image,lat,lon,categories};
 }
 
 const _plzLabelCache={};
@@ -684,7 +691,8 @@ async function enrichListing(it,wantDetails=true){
   let postal = basePostal;
   let label = baseLabel;
   let hasListingLabel=Boolean(baseLabel);
-  let price = formatPrice(it.price||"");
+  const listingPrice=String(it.price||'').trim();
+  let price = formatPrice(listingPrice);
   let image=null, categories=null, category=null;
 
   if(wantDetails){
@@ -692,7 +700,10 @@ async function enrichListing(it,wantDetails=true){
       const html=await fetchViaProxy(it.url);
       const det=await parseListingDetails(html);
       if(det.title) it.title=det.title;
-      if(det.price) price=det.price;
+      // The search-result card already contains the authoritative listing
+      // price. Detail pages also contain shipping amounts, so only fall back
+      // to their price when the search result has none.
+      if(!listingPrice && det.price) price=det.price;
       if(det.image) image=det.image;
       if(isPlz(det.postal)) postal=det.postal;
       if(det.locationLabel){ label=det.locationLabel; hasListingLabel=true; }

@@ -3,11 +3,25 @@ import sys
 from pathlib import Path
 
 import httpx
+import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from api import scraper_http
-from api.scraper_http import _parse_ads, build_search_url  # type: ignore
+from api.scraper_http import _parse_ads, _strip_price, build_search_url  # type: ignore
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("1.234 € VB", "1234"),
+        ("50 € + Versand ab 10,49 €", "50"),
+        ("10,49 €", "10,49"),
+        ("VB", ""),
+    ],
+)
+def test_strip_price_ignores_shipping_costs(raw, expected):
+    assert _strip_price(raw) == expected
 
 
 def test_build_search_url_includes_filters():
