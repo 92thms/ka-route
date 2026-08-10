@@ -38,6 +38,7 @@ Frontend läuft dann unter [http://localhost:8401](http://localhost:8401).
 | `MAINTENANCE_KEY` | — | Passwort für Wartungsmodus |
 | `STATS_HASH_SALT` | — | Zufälliger Salt für nicht rückrechenbare Besucher-Hashes |
 | `SCRAPER_RATE_LIMIT_SECONDS` | `1.0` | Mindestabstand zwischen Kleinanzeigen-Aufrufen |
+| `NOMINATIM_RATE_LIMIT_SECONDS` | `1.1` | Mindestabstand für PLZ-Fallbacks ungelöster Routenpunkte |
 | `PROXY_ALLOW_HOSTS` | Nominatim, Kleinanzeigen | Exakte Host-Allowlist für den eingeschränkten Proxy |
 
 Der Wartungsschlüssel bleibt serverseitig und wird nicht in `config.js` oder den Browser ausgeliefert. Im Produktivbetrieb sollte `STATS_HASH_SALT` auf einen langen, zufälligen Wert gesetzt werden.

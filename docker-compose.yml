@@ -12,6 +12,7 @@ services:
       USE_ORS_REVERSE: ${USE_ORS_REVERSE:-0}
       STATS_HASH_SALT: ${STATS_HASH_SALT:-}
       SCRAPER_RATE_LIMIT_SECONDS: ${SCRAPER_RATE_LIMIT_SECONDS:-1.0}
+      NOMINATIM_RATE_LIMIT_SECONDS: ${NOMINATIM_RATE_LIMIT_SECONDS:-1.1}
       PROXY_ALLOW_HOSTS: ${PROXY_ALLOW_HOSTS:-nominatim.openstreetmap.org,www.kleinanzeigen.de}
     volumes:
       - ./data:/data

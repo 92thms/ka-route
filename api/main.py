@@ -77,6 +77,11 @@ async def maintenance_auth(request: Request) -> dict[str, bool]:
 RATE_LIMIT_SECONDS = float(os.getenv("SCRAPER_RATE_LIMIT_SECONDS", "1.0"))
 _last_scrape_request: float = 0.0
 _scrape_lock = asyncio.Lock()
+NOMINATIM_RATE_LIMIT_SECONDS = float(
+    os.getenv("NOMINATIM_RATE_LIMIT_SECONDS", "1.1")
+)
+_last_nominatim_request: float = 0.0
+_nominatim_lock = asyncio.Lock()
 
 # Global cache for reverse geocoded postal codes (plz, city)
 _plz_cache: dict[str, tuple[str | None, str | None]] = {}
@@ -343,6 +348,7 @@ def _sample_route(coords: list[list[float]], step_m: float) -> list[list[float]]
 
 
 async def _reverse_plz(client: httpx.AsyncClient, api_key: str, lat: float, lon: float) -> tuple[str | None, str | None]:
+    global _last_nominatim_request
     key = f"{lat:.3f}|{lon:.3f}"
     if key in _plz_cache:
         return _plz_cache[key]
@@ -371,6 +377,48 @@ async def _reverse_plz(client: httpx.AsyncClient, api_key: str, lat: float, lon:
             logger.info("ORS reverse geocoding failed: %s", exc)
         if attempt < 2:
             await asyncio.sleep(0.5 * (attempt + 1))
+
+    if not plz:
+        # Public Nominatim is only a rate-limited fallback for route samples
+        # where ORS returned no postal code. Listing enrichment never uses it.
+        async with _nominatim_lock:
+            wait = NOMINATIM_RATE_LIMIT_SECONDS - (
+                time.monotonic() - _last_nominatim_request
+            )
+            if wait > 0:
+                await asyncio.sleep(wait)
+            try:
+                response = await client.get(
+                    "https://nominatim.openstreetmap.org/reverse",
+                    params={
+                        "lat": lat,
+                        "lon": lon,
+                        "format": "jsonv2",
+                        "zoom": 10,
+                        "addressdetails": 1,
+                    },
+                    headers={"User-Agent": "ka-route/1.0 (self-hosted)"},
+                )
+                if response.status_code == 200:
+                    address = response.json().get("address", {})
+                    plz = address.get("postcode")
+                    city = (
+                        address.get("city")
+                        or address.get("town")
+                        or address.get("village")
+                        or address.get("municipality")
+                        or address.get("state")
+                    )
+                else:
+                    logger.warning(
+                        "Nominatim reverse geocoding returned HTTP %s",
+                        response.status_code,
+                    )
+            except (httpx.HTTPError, TypeError, ValueError) as exc:
+                logger.warning("Nominatim reverse geocoding failed: %s", exc)
+            finally:
+                _last_nominatim_request = time.monotonic()
+
     # Do not cache transient misses; a later request should be allowed to retry.
     if plz:
         _plz_cache[key] = (plz, city)

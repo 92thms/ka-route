@@ -1,3 +1,5 @@
+import asyncio
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +25,29 @@ def test_sample_route_interpolates_regular_points():
 def test_sample_route_rejects_non_positive_step():
     with pytest.raises(ValueError):
         main._sample_route([[8.0, 50.0], [8.2, 50.0]], 0)
+
+
+def test_reverse_plz_uses_rate_limited_nominatim_fallback(monkeypatch):
+    class FakeClient:
+        async def get(self, url, params=None, headers=None):
+            if "openrouteservice" in url:
+                return httpx.Response(200, json={"features": []})
+            return httpx.Response(
+                200,
+                json={"address": {"postcode": "72488", "town": "Sigmaringen"}},
+            )
+
+    async def no_sleep(delay):
+        return None
+
+    main._plz_cache.clear()
+    monkeypatch.setattr(main.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(main, "_last_nominatim_request", 0.0)
+
+    result = asyncio.run(main._reverse_plz(FakeClient(), "key", 48.08, 9.22))
+
+    assert result == ("72488", "Sigmaringen")
+    assert main._plz_cache["48.080|9.220"] == result
 
 
 def test_inserate_validates_bounds_before_scraping(client):
