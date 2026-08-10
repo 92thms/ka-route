@@ -20,7 +20,7 @@ def test_proxy_allows_host(monkeypatch):
     monkeypatch.setenv("PROXY_ALLOW_HOSTS", "example.com")
 
     async def fake_get(self, url, headers=None):
-        return httpx.Response(200, content=b"ok", headers={"content-type": "text/plain"})
+        return httpx.Response(200, content=b"ok", headers={"content-type": "text/html"})
 
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
@@ -33,6 +33,9 @@ def test_proxy_allows_host(monkeypatch):
     resp = client.get("/proxy", params={"u": "http://example.com/test"})
     assert resp.status_code == 200
     assert resp.text == "ok"
+    assert resp.headers["content-type"].startswith("text/plain")
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["content-security-policy"] == "default-src 'none'"
 
 
 def test_proxy_blocks_disallowed_host(monkeypatch):

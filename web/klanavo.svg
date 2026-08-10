@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 46" fill="none">
   <!-- Pin body -->
   <path d="M20 1C12.268 1 6 7.268 6 15c0 10.5 14 29 14 29S34 25.5 34 15C34 7.268 27.732 1 20 1z"
-        fill="#ff5a36"/>
+        fill="#2f81f7"/>
   <!-- Route path inside pin -->
   <path d="M12 18 C14 13 17 15 20 15 C23 15 26 11 28 12"
         stroke="white" stroke-width="2.2" stroke-linecap="round" fill="none" opacity="0.95"/>

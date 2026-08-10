@@ -416,6 +416,14 @@ function addListingToClusters(lat, lon){
 }
 
 let activeCluster = null;
+function revealClusterResults(clusterId){
+  requestAnimationFrame(()=>{
+    resultsBox.querySelectorAll('.groupbox').forEach(box=>{ box.open=true; });
+    const firstResult=resultsBox.querySelector(`[data-cluster="${clusterId}"]`);
+    (firstResult||resultsBox).scrollIntoView({behavior:'smooth',block:'start'});
+  });
+}
+
 function highlightCluster(id){
   if(activeCluster !== null){
     const prev = markerClusters[activeCluster];
@@ -431,6 +439,7 @@ function highlightCluster(id){
     cluster.marker.setIcon(orangeIcon);
     document.querySelectorAll(`[data-cluster="${activeCluster}"]`).forEach(el=>el.classList.add('highlight'));
     clearPinBtn.classList.remove('hidden');
+    revealClusterResults(activeCluster);
   }else{
     clearPinBtn.classList.add('hidden');
   }

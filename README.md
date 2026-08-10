@@ -1,17 +1,30 @@
 # klanavo
 
-Klanavo sucht Kleinanzeigen entlang einer Route und zeigt die Treffer auf einer interaktiven Karte. Start- und Zielort eingeben, Suchbegriff eingeben, fertig. Die App sampelt Punkte entlang der berechneten Route und sucht in einem konfigurierbaren Radius darum herum.
+Klanavo sucht Kleinanzeigen entlang einer berechneten Fahrtroute und zeigt die Treffer auf einer interaktiven Karte. Die Anwendung setzt in festen Abständen Suchpunkte direkt auf die Route, löst diese in Postleitzahlen auf und führt für jeden eindeutigen Suchort eine eigene, radiusbegrenzte Kleinanzeigen-Suche aus.
 
-**Demo:** [https://klanavo.zneb.to](https://klanavo.zneb.to) — nur zu Testzwecken, bitte selbst hosten und eigene API-Keys verwenden.
+> [!IMPORTANT]
+> [klanavo.zneb.to](https://klanavo.zneb.to) ist nur eine öffentliche Testinstanz. Die dort verwendeten API-Zugänge und Upstream-Abfragen sind stark limitiert. Wenn dir das Projekt gefällt oder du es regelmäßig nutzen möchtest, hoste es bitte selbst und verwende eigene API-Keys.
 
 ## Funktionen
 
 - Routenberechnung via OpenRouteService (ORS)
 - Adress-Autocomplete via ORS Geocoding + Nominatim-Fallback
-- Kleinanzeigen-Suche an Punkten entlang der Route
-- Ergebnisse auf der Karte, gruppiert nach Ort oder Kategorie
-- Preisfilter und Sortierung
+- Zwei Suchtiefen: **Schnell** (50 km Abstand, 10 km Radius) und **Standard** (25 km Abstand, 15 km Radius)
+- Unabhängige Kleinanzeigen-Suche für jede eindeutige PLZ entlang der Route
+- Tatsächliche Standortangaben und privacy-gerundete Koordinaten der Inserate
+- Sichtbare Suchpunkte und Ergebnisse auf der Karte
+- Klick auf einen Inserat-Pin filtert die Ergebnisliste, klappt die betroffenen Gruppen auf und springt direkt zu den Treffern
+- Gruppierung nach Ort oder Kategorie sowie Preisfilter und Sortierung
 - Responsives Webfrontend, kein Build-Schritt nötig
+
+## Funktionsweise
+
+1. Start und Ziel werden über OpenRouteService ausgewählt und als eindeutige Koordinaten an das Backend übertragen.
+2. ORS berechnet die Fahrtroute.
+3. Das Backend setzt entsprechend der gewählten Suchtiefe Punkte entlang der vollständigen Routenlinie.
+4. Jeder Punkt wird per ORS-Reverse-Geocoding, bei Bedarf über einen gedrosselten Nominatim-Fallback, einer PLZ zugeordnet.
+5. Für jede eindeutige PLZ wird eine getrennte Kleinanzeigen-Suche ausgeführt. Standort-Cookies werden zwischen den Suchorten gelöscht, damit nicht der erste Ort alle weiteren Suchen überschreibt.
+6. Treffer außerhalb des eingestellten Radius werden verworfen und doppelte Inserate zusammengeführt.
 
 ## Voraussetzungen
 
@@ -33,7 +46,6 @@ Frontend läuft dann unter [http://localhost:8401](http://localhost:8401).
 | Variable | Standard | Beschreibung |
 |---|---|---|
 | `ORS_API_KEY` | — | OpenRouteService API-Key (Pflicht) |
-| `USE_ORS_REVERSE` | `0` | ORS für Reverse-Geocoding verwenden statt Nominatim |
 | `MAINTENANCE_MODE` | `0` | App sperren, Zugang nur mit Key |
 | `MAINTENANCE_KEY` | — | Passwort für Wartungsmodus |
 | `STATS_HASH_SALT` | — | Zufälliger Salt für nicht rückrechenbare Besucher-Hashes |
@@ -41,14 +53,39 @@ Frontend läuft dann unter [http://localhost:8401](http://localhost:8401).
 | `NOMINATIM_RATE_LIMIT_SECONDS` | `1.1` | Mindestabstand für PLZ-Fallbacks ungelöster Routenpunkte |
 | `PROXY_ALLOW_HOSTS` | Nominatim, Kleinanzeigen | Exakte Host-Allowlist für den eingeschränkten Proxy |
 
-Der Wartungsschlüssel bleibt serverseitig und wird nicht in `config.js` oder den Browser ausgeliefert. Im Produktivbetrieb sollte `STATS_HASH_SALT` auf einen langen, zufälligen Wert gesetzt werden.
+Der ORS-Key und der Wartungsschlüssel bleiben serverseitig und werden nicht an den Browser ausgeliefert. Im Produktivbetrieb sollte `STATS_HASH_SALT` auf einen langen, zufälligen Wert gesetzt werden.
+
+## Sicherheit
+
+- Reale Zugangsdaten gehören ausschließlich in die lokale `.env`; `.env`, Schlüsseldateien und `data/` werden von Git ignoriert.
+- Der ORS-Key wird nur vom Backend gelesen. Der ORS-Proxy erlaubt ausschließlich die für Route und Geocoding benötigten Endpunkte.
+- Der allgemeine Proxy akzeptiert nur exakt konfigurierte Hosts, nur Standardports und keine privaten oder lokalen Zieladressen. Weiterleitungen werden erneut geprüft und Antworten sind größenbegrenzt.
+- Fremde Proxy-Inhalte werden immer als nicht ausführbarer Text mit `nosniff` und restriktiver CSP ausgeliefert.
+- Nginx setzt Sicherheitsheader, blockiert Cross-Origin-Zugriffe und begrenzt Anfragen sowie parallele Verbindungen pro IP.
+- Der Wartungsmodus verwendet einen serverseitigen Schlüssel und konstantzeitlichen Vergleich. Nutze dafür ein langes, zufälliges Passwort.
+
+Vor jedem öffentlichen Deployment empfiehlt sich zusätzlich:
+
+```bash
+pip-audit -r api/requirements.txt
+```
+
+## Grenzen und Rücksicht auf Upstreams
+
+- Kleinanzeigen stellt keine offizielle öffentliche Such-API für diesen Anwendungsfall bereit. Änderungen am HTML können den Parser beeinträchtigen.
+- ORS, Nominatim und Kleinanzeigen haben Nutzungslimits. Die Anwendung serialisiert und drosselt Upstream-Aufrufe deshalb bewusst.
+- Inserat-Koordinaten sind aus Datenschutzgründen häufig gerundet und entsprechen nicht zwingend einer Hausadresse.
+- Kann ein Routenpunkt keiner PLZ zugeordnet werden, kennzeichnet die Oberfläche die Suche als teilweise abgeschlossen.
+- Das Projekt ist für private Tests und Self-Hosting gedacht. Bitte beachte die Nutzungsbedingungen der angebundenen Dienste.
 
 ## Updates
 
 Das Docker-Image wird bei jedem Push auf `main` automatisch gebaut und als `ghcr.io/92thms/ka-route:latest` veröffentlicht. Auf dem Server reicht dann:
 
 ```bash
-docker compose pull && docker compose up -d
+git pull --ff-only origin main
+docker compose pull
+docker compose up -d --force-recreate
 ```
 
 Damit das funktioniert, muss das Paket auf GitHub unter *Packages → ka-route → Package settings* auf **Public** gestellt sein — oder man loggt sich mit `docker login ghcr.io` am Server ein.
@@ -64,11 +101,15 @@ tests/        Pytest-Tests
 
 ## Entwicklung
 
-Backend und Frontend lassen sich unabhängig voneinander bearbeiten. Das Backend (`api/main.py`) startet mit Uvicorn, das Frontend ist statisch und braucht keinen Build. Tests:
+Backend und Frontend lassen sich unabhängig voneinander bearbeiten. Das Backend (`api/main.py`) startet mit Uvicorn, das Frontend ist statisch und braucht keinen Build. Prüfungen:
 
 ```bash
-pip install -r api/requirements.txt pytest
-pytest
+python -m venv .venv
+. .venv/bin/activate
+pip install -r api/requirements.txt pytest ruff
+pytest -q
+ruff check api tests
+node --check web/route.js
 ```
 
 Die Kleinanzeigen-Suche basiert auf [ebay-kleinanzeigen-api](https://github.com/DanielWTE/ebay-kleinanzeigen-api) von DanielWTE.

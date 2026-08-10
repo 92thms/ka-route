@@ -663,11 +663,16 @@ async def proxy(u: str = Query(max_length=2_048)) -> Response:
     max_bytes = int(os.getenv("PROXY_MAX_RESPONSE_BYTES", "5000000"))
     if len(upstream_response.content) > max_bytes:
         raise HTTPException(status_code=502, detail="upstream response too large")
-    content_type = upstream_response.headers.get("content-type", "text/html")
     return Response(
         content=upstream_response.content,
         status_code=upstream_response.status_code,
-        headers={"Content-Type": content_type},
+        headers={
+            # Proxy responses are parsed as text by the frontend. Never serve
+            # third-party HTML as executable content on the app's own origin.
+            "Content-Type": "text/plain; charset=utf-8",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
+        },
     )
 
 

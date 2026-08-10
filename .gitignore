@@ -1,2 +1,9 @@
 .env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+data/
 __pycache__/
