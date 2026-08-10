@@ -327,6 +327,48 @@ $("#btnReset").addEventListener('click', () => {
 function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
 
 // -------- Autocomplete --------
+async function fetchPlaceSuggestions(text, size=5){
+  text=text.trim();
+  if(!text) return [];
+  try{
+    const url=`/ors/geocode/autocomplete?text=${encodeURIComponent(text)}&boundary.country=DE&size=${size}`;
+    const res=await apiFetch(url,{headers:{"Accept":"application/json"}});
+    if(!res.ok) throw new Error("ORS autocomplete failed");
+    const j=await res.json();
+    return j?.features?.map(f=>({
+      label:f.properties?.label,
+      lon:Number(f.geometry?.coordinates?.[0]),
+      lat:Number(f.geometry?.coordinates?.[1])
+    })).filter(item=>item.label&&isDeCoord(item.lat,item.lon))||[];
+  }catch(_){
+    try{
+      const url=`https://nominatim.openstreetmap.org/search?format=json&limit=${size}&addressdetails=1&countrycodes=de&q=${encodeURIComponent(text)}`;
+      const j=await fetchJsonViaProxy(url);
+      return j?.map(r=>({
+        label:r.display_name,
+        lon:Number(r.lon),
+        lat:Number(r.lat)
+      })).filter(item=>item.label&&isDeCoord(item.lat,item.lon))||[];
+    }catch(_){ return []; }
+  }
+}
+
+function selectPlace(inp, item){
+  inp.value=item.label;
+  inp.dataset.lon=String(item.lon);
+  inp.dataset.lat=String(item.lat);
+  document.getElementById(inp.id+"-suggest").hidden=true;
+}
+
+async function selectFirstSuggestion(inp){
+  const lat=Number(inp.dataset.lat), lon=Number(inp.dataset.lon);
+  if(isDeCoord(lat,lon)) return true;
+  const suggestions=await fetchPlaceSuggestions(inp.value,1);
+  if(!suggestions.length) return false;
+  selectPlace(inp,suggestions[0]);
+  return true;
+}
+
 function setupSuggest(id){
   const inp=document.getElementById(id);
   const list=document.getElementById(id+"-suggest");
@@ -337,12 +379,7 @@ function setupSuggest(id){
     items.forEach(item=>{
       const li=document.createElement("li");
       li.textContent=item.label;
-      li.addEventListener("mousedown",()=>{
-        inp.value=item.label;
-        inp.dataset.lon=String(item.lon);
-        inp.dataset.lat=String(item.lat);
-        list.hidden=true;
-      });
+      li.addEventListener("mousedown",()=>selectPlace(inp,item));
       list.appendChild(li);
     });
     list.hidden=false;
@@ -350,28 +387,7 @@ function setupSuggest(id){
   const fetchSuggestions=debounce(async text=>{
     text=text.trim();
     if(!text){ render([]); return; }
-    let suggestions=[];
-    try{
-      const url=`/ors/geocode/autocomplete?text=${encodeURIComponent(text)}&boundary.country=DE&size=5`;
-      const res=await apiFetch(url,{headers:{"Accept":"application/json"}});
-      if(!res.ok) throw new Error("ORS autocomplete failed");
-      const j=await res.json();
-      suggestions=j?.features?.map(f=>({
-        label:f.properties?.label,
-        lon:Number(f.geometry?.coordinates?.[0]),
-        lat:Number(f.geometry?.coordinates?.[1])
-      })).filter(item=>item.label&&isDeCoord(item.lat,item.lon))||[];
-    }catch(_){
-      try{
-        const url=`https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1&countrycodes=de&q=${encodeURIComponent(text)}`;
-        const j=await fetchJsonViaProxy(url);
-        suggestions=j?.map(r=>({
-          label:r.display_name,
-          lon:Number(r.lon),
-          lat:Number(r.lat)
-        })).filter(item=>item.label&&isDeCoord(item.lat,item.lon))||[];
-      }catch(_){ suggestions=[]; }
-    }
+    const suggestions=await fetchPlaceSuggestions(text);
     render(suggestions);
   },300);
   inp.addEventListener("input",e=>{
@@ -790,6 +806,7 @@ async function fetchApiInserate(q, plz, rKm) {
 
 // ---------- Start/Stop ----------
 let running=false;
+let resolvingPlaces=false;
 let runCounter=0;
 let abortCtrl=null;
 $("#btnRun").addEventListener("click",()=>{
@@ -825,10 +842,11 @@ $("#btnRun").addEventListener("click",()=>{
 });
 
 async function run(){
+  if(resolvingPlaces) return;
   queryWarn.classList.add('hidden');
   const q=$("#query").value.trim();
-  const startText=$("#start").value.trim();
-  const zielText=$("#ziel").value.trim();
+  let startText=$("#start").value.trim();
+  let zielText=$("#ziel").value.trim();
   if(!q){
     queryWarn.classList.remove('hidden');
     setStatus("Bitte Suchbegriff eingeben.", true);
@@ -837,6 +855,21 @@ async function run(){
   if(!startText || !zielText){
     setStatus("Bitte Start und Ziel eingeben.", true);
     return;
+  }
+  resolvingPlaces=true;
+  $("#btnRun").disabled=true;
+  $("#btnRun").textContent="Orte prüfen …";
+  try{
+    await Promise.all([
+      selectFirstSuggestion($("#start")),
+      selectFirstSuggestion($("#ziel"))
+    ]);
+    startText=$("#start").value.trim();
+    zielText=$("#ziel").value.trim();
+  }finally{
+    resolvingPlaces=false;
+    $("#btnRun").disabled=false;
+    $("#btnRun").textContent="Route berechnen & suchen";
   }
   const myRun=++runCounter;
   abortCtrl=new AbortController();
