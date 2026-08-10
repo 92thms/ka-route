@@ -435,18 +435,11 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
         samples = _sample_route(coords, req.step * 1000)
         plzs: list[str] = []
         seen_plzs: set[str] = set()
-        plz_coords: dict[str, tuple[float, float]] = {}
-        plz_labels: dict[str, str] = {}
         for lon, lat in samples:
-            plz, city = await _reverse_plz(client, api_key, lat, lon)
+            plz, _ = await _reverse_plz(client, api_key, lat, lon)
             if plz and plz not in seen_plzs:
                 seen_plzs.add(plz)
                 plzs.append(plz)
-                plz_coords.setdefault(plz, (lat, lon))
-                if city:
-                    plz_labels.setdefault(plz, f"{plz} {city}")
-                else:
-                    plz_labels.setdefault(plz, plz)
 
         results: list[dict] = []
         seen: set[str] = set()
@@ -470,11 +463,16 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
                 if url in seen:
                     continue
                 seen.add(url)
-                it["plz"] = plz
-                if label := plz_labels.get(plz):
-                    it["label"] = label
-                if coords_plz := plz_coords.get(plz):
-                    it["lat"], it["lon"] = coords_plz
+                # Keep the route search origin only as diagnostics. It is not the
+                # listing's location and must never be presented or pinned as such.
+                it["search_postal_code"] = plz
+                actual_postal_code = it.get("postal_code")
+                if isinstance(actual_postal_code, str) and len(actual_postal_code) == 5:
+                    it["plz"] = actual_postal_code
+                    city = it.get("city")
+                    it["label"] = (
+                        f"{actual_postal_code} {city}" if city else actual_postal_code
+                    )
                 results.append(it)
 
     ip = _get_client_ip(request)

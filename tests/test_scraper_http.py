@@ -27,6 +27,9 @@ def test_parse_ads_extracts_expected_fields():
     <div class="ad-listitem">
       <article data-adid="321" data-href="/s-anzeige/tolles-rad/321">
         <h2 class="text-module-begin"><a class="ellipsis">Tolles Rad</a></h2>
+        <div class="aditem-main--top--left">
+          <i class="icon-pin-gray"></i> 76187 Karlsruhe + 12 km
+        </div>
         <p class="aditem-main--middle--price-shipping--price">1.234 € VB</p>
         <p class="aditem-main--middle--description">Guter Zustand</p>
       </article>
@@ -43,3 +46,5 @@ def test_parse_ads_extracts_expected_fields():
     assert ad["price"] == "1234"
     assert "Tolles Rad" == ad["title"]
     assert "Guter Zustand" == ad["description"]
+    assert ad["postal_code"] == "76187"
+    assert ad["city"] == "Karlsruhe"
