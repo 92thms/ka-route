@@ -27,6 +27,19 @@ def test_sample_route_rejects_non_positive_step():
         main._sample_route([[8.0, 50.0], [8.2, 50.0]], 0)
 
 
+def test_sample_route_keeps_spacing_across_many_short_segments():
+    route = [[index / 100, 0.0] for index in range(101)]
+
+    samples = main._sample_route(route, 25_000)
+
+    assert len(samples) == 6
+    assert samples[0] == [0.0, 0.0]
+    assert samples[-1] == [1.0, 0.0]
+    assert [point[0] for point in samples[1:-1]] == pytest.approx(
+        [0.2246, 0.4492, 0.6738, 0.8983], abs=0.001
+    )
+
+
 def test_reverse_plz_uses_rate_limited_nominatim_fallback(monkeypatch):
     class FakeClient:
         async def get(self, url, params=None, headers=None):
@@ -144,6 +157,10 @@ def test_route_search_returns_route_and_enriched_listing(monkeypatch, tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert payload["route"] == [[8.0, 50.0], [8.1, 50.0]]
+    assert payload["search_points"] == [
+        {"lat": 50.0, "lon": 8.0, "postal_code": "76133", "city": "Karlsruhe"},
+        {"lat": 50.0, "lon": 8.1, "postal_code": "76133", "city": "Karlsruhe"},
+    ]
     assert payload["coverage"] == {
         "route_samples": 2,
         "resolved_samples": 2,

@@ -454,11 +454,20 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
         samples = _sample_route(coords, req.step * 1000)
         plzs: list[str] = []
         seen_plzs: set[str] = set()
+        search_points: list[dict[str, Any]] = []
         resolved_samples = 0
         for lon, lat in samples:
-            plz, _ = await _reverse_plz(client, api_key, lat, lon)
+            plz, city = await _reverse_plz(client, api_key, lat, lon)
             if plz:
                 resolved_samples += 1
+                search_points.append(
+                    {
+                        "lat": lat,
+                        "lon": lon,
+                        "postal_code": plz,
+                        "city": city,
+                    }
+                )
                 if plz not in seen_plzs:
                     seen_plzs.add(plz)
                     plzs.append(plz)
@@ -468,6 +477,11 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
         scrape_errors: list[str] = []
         successful_searches = 0
         for plz in plzs:
+            logger.info(
+                "Searching Kleinanzeigen around postal code %s (%s km radius)",
+                plz,
+                req.radius,
+            )
             try:
                 items = await _fetch_listings(
                     query=req.query,
@@ -482,6 +496,7 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
                 scrape_errors.append(f"Search failed for postal code {plz}")
                 continue
             successful_searches += 1
+            logger.info("Found %s listings around postal code %s", len(items), plz)
             for it in items:
                 url = it.get("url")
                 if url in seen:
@@ -509,6 +524,7 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
 
     resp: dict = {
         "route": coords,
+        "search_points": search_points,
         "listings": results,
         "coverage": {
             "route_samples": len(samples),

@@ -126,10 +126,28 @@ def _parse_location(raw: str) -> tuple[str | None, str | None]:
     normalized = re.sub(
         r"\s+Kommt zu dir\b.*$", "", normalized, flags=re.IGNORECASE
     )
+    normalized = re.sub(
+        r"\s+\((?:ca\.\s*)?\d+(?:[.,]\d+)?\s*km\)\s*$",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    )
     match = re.search(r"\b(?P<postal_code>\d{5})\s+(?P<city>.+)$", normalized)
     if not match:
         return None, None
     return match.group("postal_code"), match.group("city").strip(" ,-") or None
+
+
+def _parse_distance_km(raw: str) -> float | None:
+    normalized = " ".join((raw or "").replace("\xa0", " ").split())
+    match = re.search(
+        r"(?:\+\s*|\()(?:ca\.\s*)?(?P<distance>\d+(?:[.,]\d+)?)\s*km\)?",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return float(match.group("distance").replace(",", "."))
 
 
 def _parse_ads(html: str) -> list[dict[str, Any]]:
@@ -156,6 +174,7 @@ def _parse_ads(html: str) -> list[dict[str, Any]]:
         desc_text = desc_el.get_text(" ", strip=True) if desc_el else ""
         location_text = location_el.get_text(" ", strip=True) if location_el else ""
         postal_code, city = _parse_location(location_text)
+        distance_km = _parse_distance_km(location_text)
         results.append(
             {
                 "adid": adid,
@@ -165,6 +184,7 @@ def _parse_ads(html: str) -> list[dict[str, Any]]:
                 "description": desc_text,
                 "postal_code": postal_code,
                 "city": city,
+                "distance_km": distance_km,
             }
         )
     return results
@@ -181,6 +201,10 @@ async def get_inserate_http(
 ) -> list[dict[str, Any]]:
     """Fetch Kleinanzeigen listings via HTTP parsing instead of Playwright."""
     client = await _get_client()
+    # Kleinanzeigen stores the last search location in cookies. Reusing that
+    # cookie jar made the first route location win and later postal-code
+    # searches return empty pages. Each call represents a new route location.
+    client.cookies.clear()
     results: list[dict[str, Any]] = []
     for page in range(1, page_count + 1):
         url = build_search_url(
@@ -208,6 +232,13 @@ async def get_inserate_http(
                     continue
                 raise HTTPException(status_code=502, detail="Classifieds search failed") from exc
         page_results = _parse_ads(resp.text)
+        if radius is not None:
+            page_results = [
+                item
+                for item in page_results
+                if item.get("distance_km") is None
+                or item["distance_km"] <= radius
+            ]
         results.extend(page_results)
     return results
 

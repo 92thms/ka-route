@@ -52,11 +52,50 @@ def test_parse_ads_extracts_expected_fields():
     assert "Guter Zustand" == ad["description"]
     assert ad["postal_code"] == "76187"
     assert ad["city"] == "Karlsruhe"
+    assert ad["distance_km"] == 12
+
+
+def test_scraper_clears_location_cookie_and_filters_radius(monkeypatch):
+    html = """
+    <div class="ad-listitem"><article data-adid="1" data-href="/s-anzeige/one/1">
+      <h2><a>Near</a></h2><div class="aditem-main--top--left">76187 Karlsruhe (10 km)</div>
+    </article></div>
+    <div class="ad-listitem"><article data-adid="2" data-href="/s-anzeige/two/2">
+      <h2><a>Far</a></h2><div class="aditem-main--top--left">76227 Karlsruhe (30 km)</div>
+    </article></div>
+    """
+
+    class FakeClient:
+        def __init__(self):
+            self.cookies = httpx.Cookies({"__ka-ls": "stale-location"})
+
+        async def get(self, url, follow_redirects=True):
+            assert not self.cookies
+            return httpx.Response(
+                200, text=html, request=httpx.Request("GET", url)
+            )
+
+    fake_client = FakeClient()
+
+    async def fake_get_client():
+        return fake_client
+
+    monkeypatch.setattr(scraper_http, "_get_client", fake_get_client)
+
+    result = asyncio.run(
+        scraper_http.get_inserate_http(
+            query="bike", location="76133", radius=15
+        )
+    )
+
+    assert [item["adid"] for item in result] == ["1"]
+    assert result[0]["city"] == "Karlsruhe"
 
 
 def test_scraper_retries_rate_limit(monkeypatch):
     class FakeClient:
         calls = 0
+        cookies = httpx.Cookies()
 
         async def get(self, url, follow_redirects=True):
             self.calls += 1

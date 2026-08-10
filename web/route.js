@@ -78,6 +78,7 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
 }).addTo(map);
 let routeLayer;
 const resultMarkers = L.layerGroup().addTo(map);
+const searchMarkers = L.layerGroup().addTo(map);
 
 // Shorthands
 const $=sel=>document.querySelector(sel);
@@ -141,6 +142,7 @@ function clearResults(){
   r.querySelectorAll('.groupbox').forEach(el=>el.remove());
   resultGallery.innerHTML='';
   resultMarkers.clearLayers();markerClusters.length=0;activeCluster=null;
+  searchMarkers.clearLayers();
   if(clearPinBtn) clearPinBtn.classList.add('hidden');
   groups.clear();
   lastRenderedIdx=0;
@@ -846,6 +848,21 @@ async function run(){
       L.marker(startLatLng,{icon:blueIcon}).addTo(resultMarkers).bindPopup("Start");
       L.marker(zielLatLng,{icon:redIcon}).addTo(resultMarkers).bindPopup("Ziel");
     }
+    const searchPoints=Array.isArray(data.search_points)?data.search_points:[];
+    searchPoints.forEach(point=>{
+      const lat=Number(point.lat), lon=Number(point.lon);
+      if(!isDeCoord(lat,lon)) return;
+      const place=[point.postal_code,point.city].filter(Boolean).join(' ');
+      L.circleMarker([lat,lon],{
+        radius:5,
+        color:'#ff9f1c',
+        weight:2,
+        fillColor:'#ff9f1c',
+        fillOpacity:0.8
+      }).addTo(searchMarkers).bindTooltip(
+        `Suchpunkt · ${escapeHtml(place||'?')} · ${rKm} km Radius`
+      );
+    });
     const items=data.listings||[];
     const coverage=data.coverage||{};
     if(items.length===0 && data.scrape_errors?.length){
