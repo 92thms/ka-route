@@ -1,7 +1,7 @@
 services:
-  klanavo:
+  kleinanzeigen-route-scraper:
     image: ghcr.io/92thms/kleinanzeigen-route-scraper:latest
-    container_name: klanavo
+    container_name: kleinanzeigen-route-scraper
     ports:
       - "8401:80"
     restart: unless-stopped

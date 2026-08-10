@@ -44,15 +44,15 @@ a:hover { color: var(--accent); }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 28px;
+  gap: 18px;
 }
 .app-header h1 {
   display: inline-flex;
   align-items: center;
   gap: 10px;
   color: var(--paper);
-  font: 800 25px/1 "Arial Narrow", Arial, sans-serif;
-  letter-spacing: .08em;
+  font: 800 clamp(17px, 2vw, 23px)/1 "Arial Narrow", Arial, sans-serif;
+  letter-spacing: .04em;
   text-transform: uppercase;
   white-space: nowrap;
 }

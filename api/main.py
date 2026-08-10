@@ -1,4 +1,4 @@
-"""API service for Klanavo."""
+"""API service for kleinanzeigen-route-scraper."""
 
 from __future__ import annotations
 

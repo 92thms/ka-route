@@ -1,6 +1,6 @@
-# klanavo
+# kleinanzeigen-route-scraper
 
-Klanavo sucht Kleinanzeigen entlang einer berechneten Fahrtroute und zeigt die Treffer auf einer interaktiven Karte. Die Anwendung setzt in festen Abständen Suchpunkte direkt auf die Route, löst diese in Postleitzahlen auf und führt für jeden eindeutigen Suchort eine eigene, radiusbegrenzte Kleinanzeigen-Suche aus.
+`kleinanzeigen-route-scraper` sucht Kleinanzeigen entlang einer berechneten Fahrtroute und zeigt die Treffer auf einer interaktiven Karte. Die Anwendung setzt in festen Abständen Suchpunkte direkt auf die Route, löst diese in Postleitzahlen auf und führt für jeden eindeutigen Suchort eine eigene, radiusbegrenzte Kleinanzeigen-Suche aus.
 
 > [!IMPORTANT]
 > Dieses inoffizielle Open-Source-Projekt steht in keiner Verbindung zu Kleinanzeigen und wird von Kleinanzeigen weder angeboten noch unterstützt. Der Name „Kleinanzeigen“ dient ausschließlich der Beschreibung der technischen Kompatibilität.
