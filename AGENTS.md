@@ -26,7 +26,7 @@
 ## Testing Guidelines
 - Framework: pytest with `fastapi.testclient`. Name files `test_*.py` and functions `test_*`.
 - Prefer unit tests that monkeypatch network/fs (see `tests/test_proxy.py`, `tests/test_stats.py`); avoid live HTTP calls.
-- The scheduled parser monitor is the deliberate exception: `scripts/parser_smoke.py` checks the live Kleinanzeigen HTML once per day.
+- `scripts/parser_smoke.py` is a deliberate live-HTTP exception and must only be run manually; do not add a schedule or automatic trigger.
 - Aim to cover edge cases around proxy host validation, visitor counting, and rate limiting before adding new endpoints.
 
 ## Commit & Pull Request Guidelines

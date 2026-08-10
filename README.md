@@ -3,7 +3,9 @@
 Klanavo sucht Kleinanzeigen entlang einer berechneten Fahrtroute und zeigt die Treffer auf einer interaktiven Karte. Die Anwendung setzt in festen Abständen Suchpunkte direkt auf die Route, löst diese in Postleitzahlen auf und führt für jeden eindeutigen Suchort eine eigene, radiusbegrenzte Kleinanzeigen-Suche aus.
 
 > [!IMPORTANT]
-> [klanavo.zneb.to](https://klanavo.zneb.to) ist nur eine öffentliche Testinstanz. Die dort verwendeten API-Zugänge und Upstream-Abfragen sind stark limitiert. Wenn dir das Projekt gefällt oder du es regelmäßig nutzen möchtest, hoste es bitte selbst und verwende eigene API-Keys.
+> Dieses inoffizielle Open-Source-Projekt steht in keiner Verbindung zu Kleinanzeigen und wird von Kleinanzeigen weder angeboten noch unterstützt. Der Name „Kleinanzeigen“ dient ausschließlich der Beschreibung der technischen Kompatibilität.
+>
+> Das Repository erteilt keine Erlaubnis zum automatisierten Zugriff auf Dienste oder Inhalte Dritter. Wer die Software betreibt, ist selbst dafür verantwortlich, vorab erforderliche Zustimmungen einzuholen und die jeweils geltenden Nutzungsbedingungen sowie gesetzlichen Vorgaben einzuhalten.
 
 ## Funktionen
 
@@ -73,16 +75,18 @@ pip-audit -r api/requirements.txt
 ## Grenzen und Rücksicht auf Upstreams
 
 - Kleinanzeigen stellt keine offizielle öffentliche Such-API für diesen Anwendungsfall bereit. Änderungen am HTML können den Parser beeinträchtigen.
+- Die Software ist nicht dazu bestimmt, CAPTCHAs, IP-Sperren, Authentifizierung oder andere technische Zugriffsbeschränkungen zu umgehen. Entsprechende Umgehungsfunktionen werden nicht akzeptiert.
+- Eine Drosselung technischer Anfragen ersetzt keine gegebenenfalls erforderliche Zustimmung des jeweiligen Dienstanbieters.
 - ORS, Nominatim und Kleinanzeigen haben Nutzungslimits. Die Anwendung serialisiert und drosselt Upstream-Aufrufe deshalb bewusst.
 - Inserat-Koordinaten sind aus Datenschutzgründen häufig gerundet und entsprechen nicht zwingend einer Hausadresse.
 - Kann ein Routenpunkt keiner PLZ zugeordnet werden, kennzeichnet die Oberfläche die Suche als teilweise abgeschlossen.
 - Das Projekt ist für private Tests und Self-Hosting gedacht. Bitte beachte die Nutzungsbedingungen der angebundenen Dienste.
 
-## Parser-Monitoring
+## Manueller Parser-Test
 
-Die Kleinanzeigen-Anbindung ist ein eigener HTTP-Parser in `api/scraper_http.py` und keine Laufzeitabhängigkeit von einem externen Crawler-Projekt. Weil Kleinanzeigen seine HTML-Struktur jederzeit ändern kann, führt GitHub Actions einmal täglich einen kleinen Live-Test mit genau einer Suchergebnisseite aus.
+Die Kleinanzeigen-Anbindung ist ein eigener HTTP-Parser in `api/scraper_http.py` und keine Laufzeitabhängigkeit von einem externen Crawler-Projekt. Weil Kleinanzeigen seine HTML-Struktur jederzeit ändern kann, existiert ein bewusst ausschließlich manuell startbarer Live-Test mit genau einer Suchergebnisseite.
 
-Der Monitor prüft, ob weiterhin Inserate sowie Titel, URLs, Preise und Standorte extrahiert werden. Bei einem Fehler wird automatisch ein GitHub-Issue mit dem Titel **Parser-Monitor fehlgeschlagen** geöffnet. Sobald der Test wieder erfolgreich läuft, kommentiert und schließt der Workflow das Issue automatisch. Der Test lässt sich unter *Actions → Parser live monitor* außerdem manuell starten.
+Der Test prüft, ob weiterhin Inserate sowie Titel, URLs, Preise und Standorte extrahiert werden. Er läuft nicht zeitgesteuert oder automatisch. Ein Betreiber kann ihn unter *Actions → Parser live monitor* bewusst manuell starten; bei einem Fehler wird ein GitHub-Issue mit dem Titel **Parser-Monitor fehlgeschlagen** geöffnet und nach einem späteren erfolgreichen manuellen Lauf wieder geschlossen.
 
 ## Updates
 
@@ -118,7 +122,7 @@ ruff check api tests
 node --check web/route.js
 ```
 
-Die Kleinanzeigen-Suche wird direkt durch den kleinen HTTP-Parser in `api/scraper_http.py` umgesetzt. Für Parser-Änderungen existieren lokale HTML-Tests sowie der tägliche Live-Monitor.
+Die Kleinanzeigen-Suche wird direkt durch den kleinen HTTP-Parser in `api/scraper_http.py` umgesetzt. Für Parser-Änderungen existieren lokale HTML-Tests sowie ein ausschließlich manuell startbarer Live-Test.
 
 ## Lizenz
 
