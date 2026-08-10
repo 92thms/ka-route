@@ -2,25 +2,38 @@
 
 const CONFIG = window.CONFIG || {};
 const MAINTENANCE_MODE = Boolean(CONFIG.MAINTENANCE_MODE);
-const MAINTENANCE_KEY = CONFIG.MAINTENANCE_KEY || "";
 const USE_ORS_REVERSE = Boolean(CONFIG.USE_ORS_REVERSE);
 const appEl=document.getElementById("app");
 const maintenanceEl=document.getElementById("maintenance");
-if(MAINTENANCE_MODE && MAINTENANCE_KEY){
-  const saved=localStorage.getItem("maintenanceKey");
-  if(saved===MAINTENANCE_KEY){
-    appEl.classList.remove("hidden");
-  }else{
-    maintenanceEl.classList.remove("hidden");
-    document.getElementById("btnMaintenance").addEventListener("click",()=>{
-      const val=document.getElementById("maintenanceKey").value.trim();
-      if(val===MAINTENANCE_KEY){
-        localStorage.setItem("maintenanceKey",val);
-        maintenanceEl.classList.add("hidden");
-        appEl.classList.remove("hidden");
-      }
-    });
-  }
+let maintenanceKey=sessionStorage.getItem("maintenanceKey")||"";
+
+function apiFetch(resource, options={}){
+  const headers=new Headers(options.headers||{});
+  if(maintenanceKey) headers.set("X-Maintenance-Key",maintenanceKey);
+  return fetch(resource,{...options,headers});
+}
+
+async function unlockMaintenance(key){
+  const response=await fetch('/api/maintenance-auth',{
+    method:'POST',
+    headers:{'X-Maintenance-Key':key}
+  });
+  if(!response.ok) return false;
+  maintenanceKey=key;
+  sessionStorage.setItem("maintenanceKey",key);
+  maintenanceEl.classList.add("hidden");
+  appEl.classList.remove("hidden");
+  return true;
+}
+
+if(MAINTENANCE_MODE){
+  maintenanceEl.classList.remove("hidden");
+  if(maintenanceKey) unlockMaintenance(maintenanceKey).catch(()=>{});
+  document.getElementById("btnMaintenance").addEventListener("click",async()=>{
+    const input=document.getElementById("maintenanceKey");
+    const valid=await unlockMaintenance(input.value.trim()).catch(()=>false);
+    if(!valid){ input.value=""; input.focus(); }
+  });
 }else{
   appEl.classList.remove("hidden");
 }
@@ -75,7 +88,7 @@ $("#query").addEventListener('input',()=>queryWarn.classList.add('hidden'));
 
   async function updateAnalytics(){
     try{
-      const stats=await fetch('/api/stats').then(r=>r.json()).catch(()=>({}));
+      const stats=await apiFetch('/api/stats').then(r=>r.json()).catch(()=>({}));
       const parts=[];
       if(stats.searches_saved!=null) parts.push(`gestartete Suchen: ${stats.searches_saved}`);
       if(stats.listings_found!=null) parts.push(`gecrawlte Inserate: ${stats.listings_found}`);
@@ -333,7 +346,7 @@ function setupSuggest(id){
     let labels=[];
     try{
       const url=`/ors/geocode/autocomplete?text=${encodeURIComponent(text)}&boundary.country=DE&size=5`;
-      const res=await fetch(url,{headers:{"Accept":"application/json"}});
+      const res=await apiFetch(url,{headers:{"Accept":"application/json"}});
       if(!res.ok) throw new Error("ORS autocomplete failed");
       const j=await res.json();
       labels=j?.features?.map(f=>f.properties.label).filter(Boolean)||[];
@@ -450,7 +463,7 @@ async function fetchViaProxy(url){
   const prox=`/proxy?u=${encodeURIComponent(url)}`;
   const opts={credentials:'omit',cache:'no-store'};
   if(abortCtrl) opts.signal=abortCtrl.signal;
-  const r=await fetch(prox,opts);
+  const r=await apiFetch(prox,opts);
   if(!r.ok){const txt=await r.text().catch(()=>String(r.status));throw new Error(`Proxy HTTP ${r.status}${txt?": "+txt.slice(0,80):""}`);}
   return r.text();
 }
@@ -591,7 +604,7 @@ async function reversePLZ(postal){
   let orsLat=null, orsLon=null;
   try{
     const url=`/ors/geocode/search/structured?postalcode=${encodeURIComponent(postal)}&country=DE&size=1`;
-    const res=await fetch(url,{headers:{"Accept":"application/json"},signal:abortCtrl?.signal});
+    const res=await apiFetch(url,{headers:{"Accept":"application/json"},signal:abortCtrl?.signal});
     if(res.ok){
       const j=await res.json();
       const f=j?.features?.[0];
@@ -629,7 +642,7 @@ async function reversePLZ(postal){
 async function geocodeTextOnce(text){
   try{
     const url=`/ors/geocode/search?text=${encodeURIComponent(text)}&boundary.country=DE&size=1`;
-    const res=await fetch(url,{headers:{"Accept":"application/json"},signal:abortCtrl?.signal});
+    const res=await apiFetch(url,{headers:{"Accept":"application/json"},signal:abortCtrl?.signal});
     if(!res.ok) throw new Error("ORS geocode failed");
     const j=await res.json();
     const f=j?.features?.[0];
@@ -721,7 +734,7 @@ async function fetchApiInserate(q, plz, rKm) {
       abortCtrl.signal.addEventListener('abort', onAbort);
     }
     try{
-      const resp = await fetch(url, {
+      const resp = await apiFetch(url, {
         method: "GET",
         headers: { "Accept":"application/json" },
         cache: "no-store",
@@ -814,7 +827,7 @@ async function run(){
 
   try{
     const payload={start:startText, ziel:zielText, query:q, radius:rKm, step:stepKm};
-    const resp=await fetch('/api/route-search',{
+    const resp=await apiFetch('/api/route-search',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(payload),

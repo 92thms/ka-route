@@ -182,4 +182,4 @@ async def get_inserate_http(
     return results
 
 
-__all__ = ["get_inserate_http", "build_search_url", "close_http_client"]
+__all__ = ["build_search_url", "close_http_client", "get_inserate_http"]

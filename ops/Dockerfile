@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
 # Systemdienste
 RUN apt-get update \
- && apt-get install -y --no-install-recommends nginx supervisor wget ca-certificates gettext-base git \
+ && apt-get install -y --no-install-recommends nginx supervisor wget ca-certificates gettext-base \
  && rm -rf /var/lib/apt/lists/*
 
 # Arbeitsverzeichnis
@@ -15,15 +15,8 @@ WORKDIR /app
 COPY api /app/api
 WORKDIR /app/api
 
-# Python-Abhängigkeiten der API (falls vorhanden)
-RUN if [ -f requirements.txt ]; then \
-        pip install --no-cache-dir -r requirements.txt; \
-    elif [ -f ebay-kleinanzeigen-api/requirements.txt ]; then \
-        pip install --no-cache-dir -r ebay-kleinanzeigen-api/requirements.txt; \
-    fi
-
-# ensure uvicorn is available even if no requirements file is present
-RUN pip install --no-cache-dir uvicorn
+# Python-Abhängigkeiten der API
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Nginx & Supervisor Konfigs (liegen unter ops/)
 WORKDIR /app
