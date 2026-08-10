@@ -9,7 +9,7 @@
 
 ## Demo
 
-![Routensuche und Ergebnisdarstellung](docs/demo.gif)
+![Routensuche und Ergebnisdarstellung](docs/route-search-demo.gif)
 
 ## Funktionen
 
