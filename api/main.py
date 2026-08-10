@@ -348,8 +348,9 @@ async def _reverse_plz(client: httpx.AsyncClient, api_key: str, lat: float, lon:
         return _plz_cache[key]
     plz: str | None = None
     city: str | None = None
-    prefer_ors = os.getenv("USE_ORS_REVERSE", "0").lower() in {"1", "true", "yes"}
-    if prefer_ors:
+    # Route searches already require ORS. Use it first and retry transient
+    # failures instead of bulk-querying public Nominatim for every sample.
+    for attempt in range(3):
         try:
             resp = await client.get(
                 "https://api.openrouteservice.org/geocode/reverse",
@@ -362,47 +363,17 @@ async def _reverse_plz(client: httpx.AsyncClient, api_key: str, lat: float, lon:
                 props = features[0].get("properties", {}) if features else {}
                 plz = props.get("postalcode")
                 city = props.get("locality") or props.get("region") or props.get("name")
+                if plz:
+                    break
+            if resp.status_code not in {429, 500, 502, 503, 504}:
+                break
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             logger.info("ORS reverse geocoding failed: %s", exc)
-    if not plz:
-        try:
-            resp = await client.get(
-                "https://nominatim.openstreetmap.org/reverse",
-                params={
-                    "lat": lat,
-                    "lon": lon,
-                    "format": "jsonv2",
-                    "zoom": 10,
-                    "addressdetails": 1,
-                },
-                headers={"User-Agent": "ka-route/1.0"},
-            )
-            if resp.status_code == 200:
-                address = resp.json().get("address", {})
-                plz = address.get("postcode")
-                city = (
-                    address.get("city")
-                    or address.get("town")
-                    or address.get("village")
-                    or address.get("state")
-                )
-        except (httpx.HTTPError, TypeError, ValueError) as exc:
-            logger.info("Nominatim reverse geocoding failed: %s", exc)
-    if not plz and not prefer_ors:
-        try:
-            resp = await client.get(
-                "https://api.openrouteservice.org/geocode/reverse",
-                params={"point.lat": lat, "point.lon": lon, "size": 1},
-                headers={"Authorization": api_key},
-            )
-            if resp.status_code == 200:
-                features = resp.json().get("features") or []
-                props = features[0].get("properties", {}) if features else {}
-                plz = props.get("postalcode")
-                city = props.get("locality") or props.get("region") or props.get("name")
-        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
-            logger.info("ORS reverse geocoding fallback failed: %s", exc)
-    _plz_cache[key] = (plz, city)
+        if attempt < 2:
+            await asyncio.sleep(0.5 * (attempt + 1))
+    # Do not cache transient misses; a later request should be allowed to retry.
+    if plz:
+        _plz_cache[key] = (plz, city)
     return plz, city
 
 
@@ -435,15 +406,19 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
         samples = _sample_route(coords, req.step * 1000)
         plzs: list[str] = []
         seen_plzs: set[str] = set()
+        resolved_samples = 0
         for lon, lat in samples:
             plz, _ = await _reverse_plz(client, api_key, lat, lon)
-            if plz and plz not in seen_plzs:
-                seen_plzs.add(plz)
-                plzs.append(plz)
+            if plz:
+                resolved_samples += 1
+                if plz not in seen_plzs:
+                    seen_plzs.add(plz)
+                    plzs.append(plz)
 
         results: list[dict] = []
         seen: set[str] = set()
         scrape_errors: list[str] = []
+        successful_searches = 0
         for plz in plzs:
             try:
                 items = await _fetch_listings(
@@ -458,6 +433,7 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
                 logger.warning("Scraping failed for postal code %s: %s", plz, exc)
                 scrape_errors.append(f"Search failed for postal code {plz}")
                 continue
+            successful_searches += 1
             for it in items:
                 url = it.get("url")
                 if url in seen:
@@ -483,7 +459,17 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
             _stats["visitors"].add(_anonymise_ip(ip))
         _persist_stats()
 
-    resp: dict = {"route": coords, "listings": results}
+    resp: dict = {
+        "route": coords,
+        "listings": results,
+        "coverage": {
+            "route_samples": len(samples),
+            "resolved_samples": resolved_samples,
+            "search_locations": len(plzs),
+            "successful_searches": successful_searches,
+            "failed_searches": len(scrape_errors),
+        },
+    }
     if scrape_errors:
         resp["scrape_errors"] = scrape_errors
     return resp

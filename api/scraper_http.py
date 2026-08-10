@@ -192,11 +192,21 @@ async def get_inserate_http(
             max_price=max_price,
             page=page,
         )
-        try:
-            resp = await client.get(url, follow_redirects=True)
-            resp.raise_for_status()
-        except Exception as exc:  # pragma: no cover - network errors
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        for attempt in range(3):
+            try:
+                resp = await client.get(url, follow_redirects=True)
+                if resp.status_code in {429, 500, 502, 503, 504} and attempt < 2:
+                    retry_after = resp.headers.get("retry-after", "")
+                    delay = float(retry_after) if retry_after.isdigit() else 0.75 * (attempt + 1)
+                    await asyncio.sleep(min(delay, 5.0))
+                    continue
+                resp.raise_for_status()
+                break
+            except httpx.HTTPError as exc:  # pragma: no cover - network errors
+                if attempt < 2:
+                    await asyncio.sleep(0.75 * (attempt + 1))
+                    continue
+                raise HTTPException(status_code=502, detail="Classifieds search failed") from exc
         page_results = _parse_ads(resp.text)
         results.extend(page_results)
     return results

@@ -119,6 +119,13 @@ def test_route_search_returns_route_and_enriched_listing(monkeypatch, tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert payload["route"] == [[8.0, 50.0], [8.1, 50.0]]
+    assert payload["coverage"] == {
+        "route_samples": 2,
+        "resolved_samples": 2,
+        "search_locations": 1,
+        "successful_searches": 1,
+        "failed_searches": 0,
+    }
     assert payload["listings"][0] == {
         "adid": "1",
         "url": "https://www.kleinanzeigen.de/s-anzeige/1",

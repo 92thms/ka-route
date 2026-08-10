@@ -272,6 +272,7 @@ input[type=number] { -moz-appearance: textfield; }
   animation: shimmer 1.8s linear infinite;
 }
 .bar.done  { background: var(--ok); animation: none; }
+.bar.partial { background: var(--warn); animation: none; }
 .bar.aborted { background: var(--err); animation: none; }
 @keyframes shimmer {
   from { background-position: 100% 0; }

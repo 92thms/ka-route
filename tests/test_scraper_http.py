@@ -1,8 +1,12 @@
+import asyncio
 import sys
 from pathlib import Path
 
+import httpx
+
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+from api import scraper_http
 from api.scraper_http import _parse_ads, build_search_url  # type: ignore
 
 
@@ -48,3 +52,31 @@ def test_parse_ads_extracts_expected_fields():
     assert "Guter Zustand" == ad["description"]
     assert ad["postal_code"] == "76187"
     assert ad["city"] == "Karlsruhe"
+
+
+def test_scraper_retries_rate_limit(monkeypatch):
+    class FakeClient:
+        calls = 0
+
+        async def get(self, url, follow_redirects=True):
+            self.calls += 1
+            request = httpx.Request("GET", url)
+            if self.calls == 1:
+                return httpx.Response(429, request=request)
+            return httpx.Response(200, text="<html></html>", request=request)
+
+    fake_client = FakeClient()
+
+    async def fake_get_client():
+        return fake_client
+
+    async def no_sleep(delay):
+        return None
+
+    monkeypatch.setattr(scraper_http, "_get_client", fake_get_client)
+    monkeypatch.setattr(scraper_http.asyncio, "sleep", no_sleep)
+
+    result = asyncio.run(scraper_http.get_inserate_http(query="bike", location="76133"))
+
+    assert result == []
+    assert fake_client.calls == 2

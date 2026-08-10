@@ -111,7 +111,7 @@ function setProgress(pct){
 }
 function setProgressState(state /* 'active' | 'done' | 'aborted' */, msg){
   const bar = $("#progressBar"), txt = $("#progressText");
-  bar.classList.remove("active","done","aborted");
+  bar.classList.remove("active","done","partial","aborted");
   if(state) bar.classList.add(state);
   if(msg) txt.textContent = msg;
 }
@@ -847,6 +847,7 @@ async function run(){
       L.marker(zielLatLng,{icon:redIcon}).addTo(resultMarkers).bindPopup("Ziel");
     }
     const items=data.listings||[];
+    const coverage=data.coverage||{};
     if(items.length===0 && data.scrape_errors?.length){
       throw new Error(`Scraper-Fehler: ${data.scrape_errors[0].slice(0,120)}`);
     }
@@ -874,8 +875,20 @@ async function run(){
       appendNewResults();
       setProgress(Math.min(100, Math.round(((i+1)/items.length)*100)));
     }
-    setStatus("Fertig.");
-    setProgressState("done", `Fertig – ${added} Inserate`);
+    const routeSamples=Number(coverage.route_samples||0);
+    const resolvedSamples=Number(coverage.resolved_samples||0);
+    const searchLocations=Number(coverage.search_locations||0);
+    const successfulSearches=Number(coverage.successful_searches||0);
+    const failedSearches=Number(coverage.failed_searches||0);
+    const isPartial=failedSearches>0 || (routeSamples>0 && resolvedSamples<routeSamples);
+    const coverageText=searchLocations>0?` · ${successfulSearches}/${searchLocations} Suchorte`:'';
+    if(isPartial){
+      setStatus("Suche nur teilweise abgeschlossen.",true);
+      setProgressState("partial", `Teilweise – ${added} Inserate${coverageText}`);
+    }else{
+      setStatus("Fertig.");
+      setProgressState("done", `Fertig – ${added} Inserate${coverageText}`);
+    }
     runGroup.classList.add("hidden");
     resetGroup.classList.remove("hidden");
   }catch(e){
