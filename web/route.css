@@ -63,7 +63,15 @@ a:hover { color: var(--accent); }
   text-align: right;
 }
 .tagline-note { color: var(--text-3); }
-.tagline a { display: inline-flex; margin-left: 8px; color: var(--accent); vertical-align: -2px; }
+.header-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+  white-space: nowrap;
+  vertical-align: -2px;
+}
+.tagline .header-links a { display: inline-flex; margin: 0; color: var(--accent); }
 
 #maintenance {
   width: min(360px, calc(100% - 32px));
@@ -134,7 +142,41 @@ input:not([type=range])::placeholder { color: var(--text-3); }
   font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+.run-meta {
+  grid-column: span 2;
+  min-width: 0;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 8px 12px;
+  background: #191a17;
+  border-left: 3px solid var(--accent);
+}
+.run-route {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 700;
+}
+.run-place { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-arrow { flex: 0 0 auto; color: var(--accent); }
+.run-facts {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--text-2);
+  font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+#runTimer { min-width: 48px; color: var(--route); font-size: 13px; text-align: right; }
+
 .btn-group { grid-column: span 1; justify-content: flex-end; }
+.btn-group.is-running { align-items: flex-end; }
+.btn-group.is-running #btnRun { min-width: 150px; }
 #btnRun, #btnReset, #btnMaintenance {
   min-height: 42px;
   padding: 11px 18px;
@@ -345,7 +387,11 @@ input:not([type=range])::placeholder { color: var(--text-3); }
   .header-inner { align-items: flex-start; flex-direction: column; gap: 8px; }
   .tagline { text-align: left; }
   header { grid-template-columns: 1fr; }
-  .settings-group, .btn-group { grid-column: 1; }
+  .settings-group, .run-meta, .btn-group { grid-column: 1; }
+  .run-meta { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .run-route, .run-facts { width: 100%; }
+  .run-facts { justify-content: space-between; }
+  .btn-group.is-running { align-items: stretch; }
   .setting-block { grid-template-columns: 1fr; }
   .gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #resultsControls { align-items: stretch; flex-direction: column; }

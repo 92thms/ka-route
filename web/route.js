@@ -81,7 +81,7 @@ const searchMarkers = L.layerGroup().addTo(map);
 
 // Shorthands
 const $=sel=>document.querySelector(sel);
-const startGroup=$("#grpStart"), zielGroup=$("#grpZiel"), queryGroup=$("#grpQuery"), settingsGroup=$("#grpSettings"), runGroup=$("#grpRun"), resetGroup=$("#grpReset"), mapBox=$("#map-box"), routeLoading=$("#routeLoading"), resultsBox=$("#results"), resultGallery=$("#resultGallery");
+const startGroup=$("#grpStart"), zielGroup=$("#grpZiel"), queryGroup=$("#grpQuery"), settingsGroup=$("#grpSettings"), runGroup=$("#grpRun"), resetGroup=$("#grpReset"), runMeta=$("#runMeta"), runStart=$("#runStart"), runZiel=$("#runZiel"), runDistance=$("#runDistance"), runTimer=$("#runTimer"), mapBox=$("#map-box"), routeLoading=$("#routeLoading"), resultsBox=$("#results"), resultGallery=$("#resultGallery");
 const filterPriceMin=$("#filterPriceMin"), filterPriceMax=$("#filterPriceMax"), sortPriceBtn=$("#sortPrice"), groupBtn=$("#toggleGrouping"), clearPinBtn=$("#clearPinFilter"), analyticsBox=$("#analytics");
 const queryWarn=$("#queryWarn");
 $("#query").addEventListener('input',()=>queryWarn.classList.add('hidden'));
@@ -301,6 +301,7 @@ function clearInputFields(){
 }
 
 $("#btnReset").addEventListener('click', () => {
+  resetRunSummary();
   clearInputFields();
   runGroup.classList.remove("hidden");
   resetGroup.classList.add("hidden");
@@ -809,15 +810,83 @@ let running=false;
 let resolvingPlaces=false;
 let runCounter=0;
 let abortCtrl=null;
+let runStartedAt=0;
+let runTimerInterval=null;
+
+function formatRuntime(totalSeconds){
+  const seconds=Math.max(0,Math.floor(totalSeconds));
+  const hours=Math.floor(seconds/3600);
+  const minutes=Math.floor((seconds%3600)/60);
+  const rest=seconds%60;
+  return hours>0
+    ? `${hours}:${String(minutes).padStart(2,'0')}:${String(rest).padStart(2,'0')}`
+    : `${String(minutes).padStart(2,'0')}:${String(rest).padStart(2,'0')}`;
+}
+
+function updateRunTimer(){
+  if(!runStartedAt) return;
+  runTimer.textContent=formatRuntime((performance.now()-runStartedAt)/1000);
+}
+
+function startRunTimer(){
+  if(runTimerInterval) clearInterval(runTimerInterval);
+  runStartedAt=performance.now();
+  updateRunTimer();
+  runTimerInterval=setInterval(updateRunTimer,1000);
+}
+
+function stopRunTimer(){
+  updateRunTimer();
+  if(runTimerInterval) clearInterval(runTimerInterval);
+  runTimerInterval=null;
+}
+
+function setRunPlaces(start,ziel){
+  runStart.textContent=start;
+  runStart.title=start;
+  runZiel.textContent=ziel;
+  runZiel.title=ziel;
+  runMeta.classList.remove('hidden');
+}
+
+function setDirectDistance(){
+  const startLat=Number($("#start").dataset.lat), startLon=Number($("#start").dataset.lon);
+  const zielLat=Number($("#ziel").dataset.lat), zielLon=Number($("#ziel").dataset.lon);
+  if(!isDeCoord(startLat,startLon)||!isDeCoord(zielLat,zielLon)) return;
+  const km=haversine(startLat,startLon,zielLat,zielLon)/1000;
+  runDistance.textContent=`ca. ${new Intl.NumberFormat('de-DE',{maximumFractionDigits:0}).format(km)} km Luftlinie`;
+}
+
+function setRouteDistance(coords){
+  let meters=0;
+  for(let i=1;i<coords.length;i++){
+    meters+=haversine(coords[i-1][1],coords[i-1][0],coords[i][1],coords[i][0]);
+  }
+  runDistance.textContent=meters>0
+    ? `${new Intl.NumberFormat('de-DE',{maximumFractionDigits:0}).format(meters/1000)} km Route`
+    : 'Distanz nicht verfügbar';
+}
+
+function resetRunSummary(){
+  stopRunTimer();
+  runStartedAt=0;
+  runTimer.textContent='00:00';
+  runDistance.textContent='Distanz wird berechnet …';
+  runMeta.classList.add('hidden');
+  runGroup.classList.remove('is-running');
+}
+
 $("#btnRun").addEventListener("click",()=>{
   if(running){
     running=false;
     runCounter++;
     if(abortCtrl) abortCtrl.abort();
     setStatus("Suche abgebrochen.", true);
+    stopRunTimer();
     setRouteLoading(false);
     setProgressState("aborted", "Abgebrochen");
     $("#btnRun").textContent="Route berechnen & suchen";
+    runGroup.classList.remove('is-running');
     startGroup.classList.remove("hidden");
     zielGroup.classList.remove("hidden");
     queryGroup.classList.remove("hidden");
@@ -856,6 +925,9 @@ async function run(){
     setStatus("Bitte Start und Ziel eingeben.", true);
     return;
   }
+  setRunPlaces(startText,zielText);
+  runDistance.textContent='Distanz wird berechnet …';
+  startRunTimer();
   resolvingPlaces=true;
   $("#btnRun").disabled=true;
   $("#btnRun").textContent="Orte prüfen …";
@@ -866,6 +938,8 @@ async function run(){
     ]);
     startText=$("#start").value.trim();
     zielText=$("#ziel").value.trim();
+    setRunPlaces(startText,zielText);
+    setDirectDistance();
   }finally{
     resolvingPlaces=false;
     $("#btnRun").disabled=false;
@@ -874,6 +948,7 @@ async function run(){
   const myRun=++runCounter;
   abortCtrl=new AbortController();
   running=true; $("#btnRun").textContent="Abbrechen";
+  runGroup.classList.add('is-running');
   startGroup.classList.add("hidden");
   zielGroup.classList.add("hidden");
   queryGroup.classList.add("hidden");
@@ -907,6 +982,7 @@ async function run(){
     data=data||{};
     setRouteLoading(false);
     const coords=data.route||[];
+    setRouteDistance(coords);
     if(routeLayer) map.removeLayer(routeLayer);
     if(coords.length){
       routeLayer=L.polyline(coords.map(c=>[c[1],c[0]]),{weight:5,color:'#1e66f5'}).addTo(map);
@@ -974,10 +1050,12 @@ async function run(){
       setStatus("Fertig.");
       setProgressState("done", `Fertig – ${added} Inserate${coverageText}`);
     }
+    stopRunTimer();
     runGroup.classList.add("hidden");
     resetGroup.classList.remove("hidden");
   }catch(e){
     setRouteLoading(false);
+    stopRunTimer();
     if(myRun===runCounter){
       setStatus(e.message,true);
       const errMsg=e.name==='AbortError'?'Abgebrochen':(e.message||'Unbekannter Fehler').slice(0,90);
@@ -987,5 +1065,6 @@ async function run(){
     }
   }
   running=false; $("#btnRun").textContent="Route berechnen & suchen"; abortCtrl=null;
+  runGroup.classList.remove('is-running');
   updateAnalytics();
 }
