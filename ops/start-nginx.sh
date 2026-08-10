@@ -3,10 +3,9 @@ set -eu
 
 : "${MAINTENANCE_MODE:=0}"
 : "${MAINTENANCE_KEY:=}"
-: "${USE_ORS_REVERSE:=0}"
 
 # shellcheck disable=SC2016
-envsubst '${MAINTENANCE_MODE} ${USE_ORS_REVERSE}' \
+envsubst '${MAINTENANCE_MODE}' \
     < /usr/share/nginx/html/config.js.template \
     > /usr/share/nginx/html/config.js
 

@@ -2,7 +2,6 @@
 
 const CONFIG = window.CONFIG || {};
 const MAINTENANCE_MODE = Boolean(CONFIG.MAINTENANCE_MODE);
-const USE_ORS_REVERSE = Boolean(CONFIG.USE_ORS_REVERSE);
 const appEl=document.getElementById("app");
 const maintenanceEl=document.getElementById("maintenance");
 let maintenanceKey=sessionStorage.getItem("maintenanceKey")||"";
@@ -450,15 +449,6 @@ clearPinBtn.addEventListener('click', () => highlightCluster(null));
 map.on('click', () => highlightCluster(null));
 
 // ---- Route-Index & Distanzberechnung ----
-async function loadRBush(){
-  if(window.RBush) return window.RBush;
-  await new Promise((res,rej)=>{
-    const s=document.createElement('script');
-    s.src='https://cdn.jsdelivr.net/npm/rbush@3.0.1/rbush.min.js';
-    s.onload=res; s.onerror=rej; document.head.appendChild(s);
-  });
-  return window.RBush;
-}
 function toXY(lat,lon){
   return [lon*111320*Math.cos(lat*Math.PI/180), lat*110540];
 }

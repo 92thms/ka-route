@@ -7,7 +7,7 @@
 - `ops/` container runtime assets (Dockerfile, Nginx, supervisord) and `docker-compose.yml` for local orchestration; runtime data persists under `data/` (e.g., `data/stats.json`).
 
 ## Build, Test, and Development Commands
-- Bootstrap env: `cp .env.example .env` then set `ORS_API_KEY` (and optional `USE_ORS_REVERSE`, `MAINTENANCE_*`).
+- Bootstrap env: `cp .env.example .env` then set `ORS_API_KEY` (and optional `MAINTENANCE_*`).
 - Full stack via Docker: `docker-compose up --build` (exposes UI on `http://localhost:8401`, mounts `./data`).
 - Backend local dev (without Docker):  
   ```bash

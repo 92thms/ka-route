@@ -23,7 +23,7 @@ WORKDIR /app
 COPY ops/nginx.conf /etc/nginx/nginx.conf
 COPY ops/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY ops/start-nginx.sh /app/ops/start-nginx.sh
-RUN chmod +x /app/ops/start-nginx.sh
+RUN chmod +x /app/ops/start-nginx.sh && nginx -t
 
 # Frontend in Webroot (liegt unter web/)
 COPY web /usr/share/nginx/html
