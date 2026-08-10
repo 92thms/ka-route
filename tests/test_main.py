@@ -81,6 +81,19 @@ def test_route_search_validates_price_range(client):
     assert response.status_code == 422
 
 
+def test_route_search_rejects_selected_coordinates_outside_germany(client):
+    response = client.post(
+        "/api/route-search",
+        json={
+            "start": "Owingen",
+            "ziel": "Karlsruhe",
+            "start_coordinates": [2.35, 48.86],
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_maintenance_mode_protects_api(monkeypatch):
     monkeypatch.setenv("MAINTENANCE_MODE", "1")
     monkeypatch.setenv("MAINTENANCE_KEY", "secret")
@@ -116,7 +129,7 @@ def test_route_search_returns_route_and_enriched_listing(monkeypatch, tmp_path):
     )
 
     async def fake_geocode(client, api_key, text):
-        return (8.0, 50.0) if text == "Start" else (8.1, 50.0)
+        raise AssertionError("selected coordinates must not be geocoded again")
 
     async def fake_reverse(client, api_key, lat, lon):
         return "76133", "Karlsruhe"
@@ -151,7 +164,13 @@ def test_route_search_returns_route_and_enriched_listing(monkeypatch, tmp_path):
 
     response = TestClient(main.app).post(
         "/api/route-search",
-        json={"start": "Start", "ziel": "Ziel", "query": "Fahrrad"},
+        json={
+            "start": "Start",
+            "ziel": "Ziel",
+            "start_coordinates": [8.0, 50.0],
+            "ziel_coordinates": [8.1, 50.0],
+            "query": "Fahrrad",
+        },
     )
 
     assert response.status_code == 200

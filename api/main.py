@@ -255,6 +255,8 @@ async def inserate(
 class RouteSearchRequest(BaseModel):
     start: str = Field(min_length=1, max_length=200)
     ziel: str = Field(min_length=1, max_length=200)
+    start_coordinates: tuple[float, float] | None = None
+    ziel_coordinates: tuple[float, float] | None = None
     radius: int = Field(default=10, ge=0, le=200)
     step: int = Field(default=10, ge=1, le=100)
     query: str | None = Field(default=None, max_length=100)
@@ -270,6 +272,15 @@ class RouteSearchRequest(BaseModel):
             and self.min_price > self.max_price
         ):
             raise ValueError("min_price must not exceed max_price")
+        for name, coordinates in (
+            ("start_coordinates", self.start_coordinates),
+            ("ziel_coordinates", self.ziel_coordinates),
+        ):
+            if coordinates is None:
+                continue
+            lon, lat = coordinates
+            if not (5 < lon < 16 and 47 < lat < 56):
+                raise ValueError(f"{name} must be inside Germany")
         return self
 
 
@@ -434,8 +445,12 @@ async def route_search(req: RouteSearchRequest, request: Request) -> dict:
 
     timeout = httpx.Timeout(20.0, connect=10.0)
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-        start_ll = await _geocode_text(client, api_key, req.start)
-        ziel_ll = await _geocode_text(client, api_key, req.ziel)
+        start_ll = req.start_coordinates or await _geocode_text(
+            client, api_key, req.start
+        )
+        ziel_ll = req.ziel_coordinates or await _geocode_text(
+            client, api_key, req.ziel
+        )
         try:
             route_response = await client.post(
                 "https://api.openrouteservice.org/v2/directions/driving-car/geojson",

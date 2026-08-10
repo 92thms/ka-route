@@ -334,10 +334,15 @@ function setupSuggest(id){
   const render=items=>{
     list.innerHTML="";
     if(!items.length){ list.hidden=true; return; }
-    items.forEach(txt=>{
+    items.forEach(item=>{
       const li=document.createElement("li");
-      li.textContent=txt;
-      li.addEventListener("mousedown",()=>{ inp.value=txt; list.hidden=true; });
+      li.textContent=item.label;
+      li.addEventListener("mousedown",()=>{
+        inp.value=item.label;
+        inp.dataset.lon=String(item.lon);
+        inp.dataset.lat=String(item.lat);
+        list.hidden=true;
+      });
       list.appendChild(li);
     });
     list.hidden=false;
@@ -345,23 +350,35 @@ function setupSuggest(id){
   const fetchSuggestions=debounce(async text=>{
     text=text.trim();
     if(!text){ render([]); return; }
-    let labels=[];
+    let suggestions=[];
     try{
       const url=`/ors/geocode/autocomplete?text=${encodeURIComponent(text)}&boundary.country=DE&size=5`;
       const res=await apiFetch(url,{headers:{"Accept":"application/json"}});
       if(!res.ok) throw new Error("ORS autocomplete failed");
       const j=await res.json();
-      labels=j?.features?.map(f=>f.properties.label).filter(Boolean)||[];
+      suggestions=j?.features?.map(f=>({
+        label:f.properties?.label,
+        lon:Number(f.geometry?.coordinates?.[0]),
+        lat:Number(f.geometry?.coordinates?.[1])
+      })).filter(item=>item.label&&isDeCoord(item.lat,item.lon))||[];
     }catch(_){
       try{
         const url=`https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1&countrycodes=de&q=${encodeURIComponent(text)}`;
         const j=await fetchJsonViaProxy(url);
-        labels=j?.map(r=>r.display_name).filter(Boolean)||[];
-      }catch(_){ labels=[]; }
+        suggestions=j?.map(r=>({
+          label:r.display_name,
+          lon:Number(r.lon),
+          lat:Number(r.lat)
+        })).filter(item=>item.label&&isDeCoord(item.lat,item.lon))||[];
+      }catch(_){ suggestions=[]; }
     }
-    render(labels);
+    render(suggestions);
   },300);
-  inp.addEventListener("input",e=>fetchSuggestions(e.target.value));
+  inp.addEventListener("input",e=>{
+    delete inp.dataset.lat;
+    delete inp.dataset.lon;
+    fetchSuggestions(e.target.value);
+  });
   inp.addEventListener("blur",()=>setTimeout(()=>list.hidden=true,100));
 }
 
@@ -825,6 +842,10 @@ async function run(){
 
   try{
     const payload={start:startText, ziel:zielText, query:q, radius:rKm, step:stepKm};
+    const startLat=Number($("#start").dataset.lat), startLon=Number($("#start").dataset.lon);
+    const zielLat=Number($("#ziel").dataset.lat), zielLon=Number($("#ziel").dataset.lon);
+    if(isDeCoord(startLat,startLon)) payload.start_coordinates=[startLon,startLat];
+    if(isDeCoord(zielLat,zielLon)) payload.ziel_coordinates=[zielLon,zielLat];
     const resp=await apiFetch('/api/route-search',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
