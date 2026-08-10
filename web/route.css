@@ -61,7 +61,7 @@ a:hover { color: var(--accent); }
   text-align: right;
 }
 .tagline-note { color: var(--text-3); }
-.tagline a { margin-left: 8px; color: var(--accent); }
+.tagline a { display: inline-flex; margin-left: 8px; color: var(--accent); vertical-align: -2px; }
 
 #maintenance {
   width: min(360px, calc(100% - 32px));
