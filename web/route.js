@@ -81,7 +81,7 @@ const searchMarkers = L.layerGroup().addTo(map);
 
 // Shorthands
 const $=sel=>document.querySelector(sel);
-const startGroup=$("#grpStart"), zielGroup=$("#grpZiel"), queryGroup=$("#grpQuery"), settingsGroup=$("#grpSettings"), runGroup=$("#grpRun"), resetGroup=$("#grpReset"), mapBox=$("#map-box"), resultsBox=$("#results"), resultGallery=$("#resultGallery");
+const startGroup=$("#grpStart"), zielGroup=$("#grpZiel"), queryGroup=$("#grpQuery"), settingsGroup=$("#grpSettings"), runGroup=$("#grpRun"), resetGroup=$("#grpReset"), mapBox=$("#map-box"), routeLoading=$("#routeLoading"), resultsBox=$("#results"), resultGallery=$("#resultGallery");
 const filterPriceMin=$("#filterPriceMin"), filterPriceMax=$("#filterPriceMax"), sortPriceBtn=$("#sortPrice"), groupBtn=$("#toggleGrouping"), clearPinBtn=$("#clearPinFilter"), analyticsBox=$("#analytics");
 const queryWarn=$("#queryWarn");
 $("#query").addEventListener('input',()=>queryWarn.classList.add('hidden'));
@@ -119,6 +119,7 @@ function setProgressState(state /* 'active' | 'done' | 'aborted' */, msg){
 // -------- Status (nur Konsole) --------
 function setStatus(msg,isErr=false){ (isErr?console.error:console.log)(msg); }
 function resetStatus(){}
+function setRouteLoading(visible){ routeLoading.classList.toggle("hidden", !visible); }
 
 // -------- Ergebnisliste: gruppiert + Galerie --------
 const groups = new Map(); // key -> details element
@@ -435,7 +436,7 @@ function highlightCluster(id){
   document.querySelectorAll(`[data-cluster]`).forEach(el=>el.classList.remove('highlight'));
   if(activeCluster!==null){
     const cluster = markerClusters[activeCluster];
-    cluster.marker.setIcon(orangeIcon);
+    cluster.marker.setIcon(activeIcon);
     document.querySelectorAll(`[data-cluster="${activeCluster}"]`).forEach(el=>el.classList.add('highlight'));
     clearPinBtn.classList.remove('hidden');
     revealClusterResults(activeCluster);
@@ -728,7 +729,7 @@ function makeSvgIcon(color, size=28){
 const greenIcon =makeSvgIcon('#4ade80');
 const blueIcon  =makeSvgIcon('#6a8fff');
 const redIcon   =makeSvgIcon('#f87171');
-const orangeIcon=makeSvgIcon('#fb923c');
+const activeIcon=makeSvgIcon('#a9cf45');
 
 // ---------- ROBUSTER MOBILE-FETCH FÜR /api/inserate ----------
 async function fetchApiInserate(q, plz, rKm) {
@@ -786,6 +787,7 @@ $("#btnRun").addEventListener("click",()=>{
     runCounter++;
     if(abortCtrl) abortCtrl.abort();
     setStatus("Suche abgebrochen.", true);
+    setRouteLoading(false);
     setProgressState("aborted", "Abgebrochen");
     $("#btnRun").textContent="Route berechnen & suchen";
     startGroup.classList.remove("hidden");
@@ -836,6 +838,7 @@ async function run(){
   $("#results").classList.remove("hidden");
   map.invalidateSize();
   clearResults();
+  setRouteLoading(true);
   setProgressState("active");
   setProgress(0);
 
@@ -858,6 +861,7 @@ async function run(){
       throw new Error(`HTTP ${resp.status}${detail}`);
     }
     data=data||{};
+    setRouteLoading(false);
     const coords=data.route||[];
     if(routeLayer) map.removeLayer(routeLayer);
     if(coords.length){
@@ -875,9 +879,9 @@ async function run(){
       const place=[point.postal_code,point.city].filter(Boolean).join(' ');
       L.circleMarker([lat,lon],{
         radius:5,
-        color:'#ff9f1c',
+        color:'#86b817',
         weight:2,
-        fillColor:'#ff9f1c',
+        fillColor:'#86b817',
         fillOpacity:0.8
       }).addTo(searchMarkers).bindTooltip(
         `Suchpunkt · ${escapeHtml(place||'?')} · ${rKm} km Radius`
@@ -929,6 +933,7 @@ async function run(){
     runGroup.classList.add("hidden");
     resetGroup.classList.remove("hidden");
   }catch(e){
+    setRouteLoading(false);
     if(myRun===runCounter){
       setStatus(e.message,true);
       const errMsg=e.name==='AbortError'?'Abgebrochen':(e.message||'Unbekannter Fehler').slice(0,90);
