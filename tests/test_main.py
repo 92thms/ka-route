@@ -90,6 +90,8 @@ def test_route_search_returns_route_and_enriched_listing(monkeypatch, tmp_path):
                 "url": "https://www.kleinanzeigen.de/s-anzeige/1",
                 "title": "Fahrrad",
                 "price": "100",
+                "postal_code": "76187",
+                "city": "Karlsruhe",
             }
         ]
 
@@ -122,8 +124,9 @@ def test_route_search_returns_route_and_enriched_listing(monkeypatch, tmp_path):
         "url": "https://www.kleinanzeigen.de/s-anzeige/1",
         "title": "Fahrrad",
         "price": "100",
-        "plz": "76133",
-        "label": "76133 Karlsruhe",
-        "lat": 50.0,
-        "lon": 8.0,
+        "postal_code": "76187",
+        "city": "Karlsruhe",
+        "search_postal_code": "76133",
+        "plz": "76187",
+        "label": "76187 Karlsruhe",
     }

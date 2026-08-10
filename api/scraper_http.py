@@ -117,6 +117,21 @@ def _strip_price(raw: str) -> str:
     return cleaned
 
 
+def _parse_location(raw: str) -> tuple[str | None, str | None]:
+    """Extract the listing's own postal code and city from a search result."""
+    normalized = " ".join((raw or "").replace("\xa0", " ").split())
+    normalized = re.sub(
+        r"\s+\+\s*\d+\s*km\b.*$", "", normalized, flags=re.IGNORECASE
+    )
+    normalized = re.sub(
+        r"\s+Kommt zu dir\b.*$", "", normalized, flags=re.IGNORECASE
+    )
+    match = re.search(r"\b(?P<postal_code>\d{5})\s+(?P<city>.+)$", normalized)
+    if not match:
+        return None, None
+    return match.group("postal_code"), match.group("city").strip(" ,-") or None
+
+
 def _parse_ads(html: str) -> list[dict[str, Any]]:
     soup = BeautifulSoup(html, "html.parser")
     results: list[dict[str, Any]] = []
@@ -135,9 +150,12 @@ def _parse_ads(html: str) -> list[dict[str, Any]]:
         )
         price_el = article.select_one("p.aditem-main--middle--price-shipping--price")
         desc_el = article.select_one("p.aditem-main--middle--description")
+        location_el = article.select_one(".aditem-main--top--left")
         title_text = title_el.get_text(strip=True) if title_el else ""
         price_text = _strip_price(price_el.get_text(" ", strip=True) if price_el else "")
         desc_text = desc_el.get_text(" ", strip=True) if desc_el else ""
+        location_text = location_el.get_text(" ", strip=True) if location_el else ""
+        postal_code, city = _parse_location(location_text)
         results.append(
             {
                 "adid": adid,
@@ -145,6 +163,8 @@ def _parse_ads(html: str) -> list[dict[str, Any]]:
                 "title": title_text,
                 "price": price_text,
                 "description": desc_text,
+                "postal_code": postal_code,
+                "city": city,
             }
         )
     return results

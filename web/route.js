@@ -507,13 +507,18 @@ async function parseListingDetails(html){
   const doc=new DOMParser().parseFromString(html,'text/html');
   const title=doc.querySelector('meta[property="og:title"]')?.content||doc.title||null;
   let image=doc.querySelector('meta[property="og:image"]')?.content||null;
-  let postal=null, lat=null, lon=null;
+  let postal=null, locationLabel=null, lat=null, lon=null;
   let categories=[];
 
   // Kategorien aus Breadcrumb
   categories=[...doc.querySelectorAll('.breadcrump-link')].map(el=>el.textContent.trim()).filter(Boolean);
 
-  // 1) JSON-LD — trusted structured source
+  // 1) Kleinanzeigen exposes the listing's own (privacy-rounded) coordinates here.
+  const ogLat=parseFloat(doc.querySelector('meta[property="og:latitude"]')?.content||'');
+  const ogLon=parseFloat(doc.querySelector('meta[property="og:longitude"]')?.content||'');
+  if(isDeCoord(ogLat,ogLon)){ lat=ogLat; lon=ogLon; }
+
+  // 2) JSON-LD — trusted structured source
   doc.querySelectorAll('script[type="application/ld+json"]').forEach(s=>{
     try{
       const obj=JSON.parse(s.textContent);
@@ -531,7 +536,7 @@ async function parseListingDetails(html){
     }catch(_){}
   });
 
-  // 2) __INITIAL_STATE__ — trusted structured source
+  // 3) __INITIAL_STATE__ — trusted structured source
   if(!postal||lat===null||lon===null){
     doc.querySelectorAll('script').forEach(s=>{
       const t=s.textContent||'';
@@ -556,7 +561,7 @@ async function parseListingDetails(html){
     });
   }
 
-  // 3) Specific meta tags for postal code (reliable, not from description text)
+  // 4) Specific meta tags for postal code (reliable, not from description text)
   if(!postal){
     const cand = doc.querySelector('meta[property="og:postal-code"]')?.content
               || doc.querySelector('meta[name="postal-code"]')?.content
@@ -564,16 +569,20 @@ async function parseListingDetails(html){
     if(isPlz(cand)) postal = cand;
   }
 
-  // 4) Known Kleinanzeigen location element — extract leading 5-digit PLZ only
-  if(!postal){
-    const locEl=doc.querySelector('#viewad-locality, [data-testid="ad-location"], .addetailslist--detail--value');
-    if(locEl){
-      const m=locEl.textContent.match(/\b(\d{5})\b/);
-      if(m) postal=m[1];
+  // 5) Visible listing location is authoritative for postal code and city label.
+  const locEl=doc.querySelector('#viewad-locality, [data-testid="ad-location"], .addetailslist--detail--value');
+  if(locEl){
+    const raw=locEl.textContent.replace(/\s+/g,' ').trim();
+    const m=raw.match(/\b(\d{5})\b\s*(.*)$/);
+    if(m){
+      postal=m[1];
+      const remainder=m[2].trim();
+      const city=(remainder.includes(' - ')?remainder.split(' - ').pop():remainder).trim();
+      locationLabel=city?`${postal} ${city}`:postal;
     }
   }
 
-  // 5) lat/lon raw regex fallback — only if it looks like a real German coordinate
+  // 6) lat/lon raw regex fallback — only if it looks like a real German coordinate
   if(lat===null||lon===null){
     const lm=html.match(/"(?:latitude|lat)"\s*:\s*([0-9.+-]+)/i);
     const lom=html.match(/"(?:longitude|lon|lng)"\s*:\s*([0-9.+-]+)/i);
@@ -595,7 +604,7 @@ async function parseListingDetails(html){
     if(pm) price=pm[1].toString().trim();
   }
 
-  return {title,postal,price:formatPrice(price),image,lat,lon,categories};
+  return {title,postal,locationLabel,price:formatPrice(price),image,lat,lon,categories};
 }
 
 const _plzLabelCache={};
@@ -660,15 +669,13 @@ async function geocodeTextOnce(text){
 }
 
 async function enrichListing(it,wantDetails=true){
-  // Backend gives route-sample-point coords as last-resort fallback.
-  const baseLat = isDeCoord(it.lat, it.lon) ? it.lat : null;
-  const baseLon = isDeCoord(it.lat, it.lon) ? it.lon : null;
   const baseLabel = it.label || null;
-  const basePostal = isPlz(it.plz) ? it.plz : null;
+  const basePostal = isPlz(it.postal_code)?it.postal_code:(isPlz(it.plz)?it.plz:null);
 
   let lat=null, lon=null;
   let postal = basePostal;
   let label = baseLabel;
+  let hasListingLabel=Boolean(baseLabel);
   let price = formatPrice(it.price||"");
   let image=null, categories=null, category=null;
 
@@ -680,6 +687,7 @@ async function enrichListing(it,wantDetails=true){
       if(det.price) price=det.price;
       if(det.image) image=det.image;
       if(isPlz(det.postal)) postal=det.postal;
+      if(det.locationLabel){ label=det.locationLabel; hasListingLabel=true; }
       // Best source: exact coordinates from the listing's own detail page
       if(isDeCoord(det.lat, det.lon)){ lat=det.lat; lon=det.lon; }
       categories=det.categories;
@@ -688,20 +696,19 @@ async function enrichListing(it,wantDetails=true){
   }
 
   // Geocode the listing's own PLZ — gives city name and PLZ-centroid coords.
-  // Prefer these over route sample points because they reflect the actual listing location.
+  // Use the PLZ centroid only when the detail page has no usable coordinates.
   if(postal){
     try{
       const g=await reversePLZ(postal);
       const hasCity=s=>typeof s==='string' && /\S+\s+\S/.test(s.trim());
-      if(hasCity(g.display)) label=g.display;
+      if(!hasListingLabel && hasCity(g.display)) label=g.display;
       else if(!hasCity(label)) label=g.display||postal;
       if(!isDeCoord(lat,lon) && isDeCoord(g.lat,g.lon)){ lat=g.lat; lon=g.lon; }
     }catch(_){}
   }
 
-  // Last resort: route sample point so the listing at least appears on the map.
-  if(!isDeCoord(lat,lon)){ lat=baseLat; lon=baseLon; }
-  if(!label) label=baseLabel||postal||"?";
+  // Never fabricate a listing pin from the route search point.
+  if(!label) label=postal||"?";
 
   return {lat,lon,label,price,image,postal,categories,category};
 }
@@ -861,7 +868,7 @@ async function run(){
       if(abortCtrl?.signal.aborted) break;
       const info=await enrichListing(it,true);
       const hasCoords = info.lat!=null && info.lon!=null;
-      const label=info.label||it.plz||"?";
+      const label=info.label||it.postal_code||it.plz||"?";
       const imgHtml=info.image?`<img src="${escapeHtml(info.image)}" alt="" loading="lazy">`:"";
       const catName=info.category||'';
       const locText=label||"";
@@ -871,7 +878,7 @@ async function run(){
         const cluster=addListingToClusters(info.lat,info.lon);
         resultItems.push({label,cardHtml,priceVal:parsePriceVal(info.price),category:catName,clusterId:cluster.id});
       } else {
-        console.error('No coords for listing — backend sent lat='+it.lat+' lon='+it.lon+' | after enrich lat='+info.lat+' lon='+info.lon+' | url='+it.url);
+        console.error('No trustworthy listing coordinates for '+it.url);
         resultItems.push({label,cardHtml,priceVal:parsePriceVal(info.price),category:catName,clusterId:null});
       }
       added++;
