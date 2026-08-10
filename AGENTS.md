@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `api/` FastAPI service with HTTP-based Kleinanzeigen scraper (entrypoint `api/main.py`); bundled upstream scraper code lives in `api/ebay-kleinanzeigen-api/`.
+- `api/` FastAPI service with the project's own HTTP-based Kleinanzeigen scraper (`api/scraper_http.py`) and API entrypoint (`api/main.py`).
 - `web/` static frontend (HTML/JS/CSS) served by Nginx in production; copy `web/config.js.template` to `web/config.js` when customizing endpoints or maintenance mode text.
 - `tests/` pytest suites using `fastapi.testclient` to exercise proxy and stats endpoints.
 - `ops/` container runtime assets (Dockerfile, Nginx, supervisord) and `docker-compose.yml` for local orchestration; runtime data persists under `data/` (e.g., `data/stats.json`).
@@ -26,6 +26,7 @@
 ## Testing Guidelines
 - Framework: pytest with `fastapi.testclient`. Name files `test_*.py` and functions `test_*`.
 - Prefer unit tests that monkeypatch network/fs (see `tests/test_proxy.py`, `tests/test_stats.py`); avoid live HTTP calls.
+- The scheduled parser monitor is the deliberate exception: `scripts/parser_smoke.py` checks the live Kleinanzeigen HTML once per day.
 - Aim to cover edge cases around proxy host validation, visitor counting, and rate limiting before adding new endpoints.
 
 ## Commit & Pull Request Guidelines

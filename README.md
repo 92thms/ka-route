@@ -78,6 +78,12 @@ pip-audit -r api/requirements.txt
 - Kann ein Routenpunkt keiner PLZ zugeordnet werden, kennzeichnet die Oberfläche die Suche als teilweise abgeschlossen.
 - Das Projekt ist für private Tests und Self-Hosting gedacht. Bitte beachte die Nutzungsbedingungen der angebundenen Dienste.
 
+## Parser-Monitoring
+
+Die Kleinanzeigen-Anbindung ist ein eigener HTTP-Parser in `api/scraper_http.py` und keine Laufzeitabhängigkeit von einem externen Crawler-Projekt. Weil Kleinanzeigen seine HTML-Struktur jederzeit ändern kann, führt GitHub Actions einmal täglich einen kleinen Live-Test mit genau einer Suchergebnisseite aus.
+
+Der Monitor prüft, ob weiterhin Inserate sowie Titel, URLs, Preise und Standorte extrahiert werden. Bei einem Fehler wird automatisch ein GitHub-Issue mit dem Titel **Parser-Monitor fehlgeschlagen** geöffnet. Sobald der Test wieder erfolgreich läuft, kommentiert und schließt der Workflow das Issue automatisch. Der Test lässt sich unter *Actions → Parser live monitor* außerdem manuell starten.
+
 ## Updates
 
 Das Docker-Image wird bei jedem Push auf `main` automatisch gebaut und als `ghcr.io/92thms/ka-route:latest` veröffentlicht. Auf dem Server reicht dann:
@@ -112,7 +118,7 @@ ruff check api tests
 node --check web/route.js
 ```
 
-Die Kleinanzeigen-Suche basiert auf [ebay-kleinanzeigen-api](https://github.com/DanielWTE/ebay-kleinanzeigen-api) von DanielWTE.
+Die Kleinanzeigen-Suche wird direkt durch den kleinen HTTP-Parser in `api/scraper_http.py` umgesetzt. Für Parser-Änderungen existieren lokale HTML-Tests sowie der tägliche Live-Monitor.
 
 ## Lizenz
 

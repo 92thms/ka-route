@@ -1,0 +1,57 @@
+name: Parser live monitor
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: parser-live-monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r api/requirements.txt
+      - name: Check live parser
+        id: parser
+        continue-on-error: true
+        run: python scripts/parser_smoke.py
+      - name: Open parser alert
+        if: steps.parser.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          issue_number="$(gh issue list --state open --json number,title --jq '.[] | select(.title == "Parser-Monitor fehlgeschlagen") | .number' | head -n 1)"
+          if [ -z "$issue_number" ]; then
+            gh issue create \
+              --title "Parser-Monitor fehlgeschlagen" \
+              --body "Der tägliche Live-Test konnte Kleinanzeigen-Suchergebnisse nicht mehr zuverlässig parsen. Workflow: $RUN_URL"
+          else
+            gh issue comment "$issue_number" --body "Der Parser-Monitor ist erneut fehlgeschlagen: $RUN_URL"
+          fi
+          exit 1
+      - name: Close resolved parser alert
+        if: steps.parser.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          issue_number="$(gh issue list --state open --json number,title --jq '.[] | select(.title == "Parser-Monitor fehlgeschlagen") | .number' | head -n 1)"
+          if [ -n "$issue_number" ]; then
+            gh issue comment "$issue_number" --body "Der Parser-Monitor läuft wieder erfolgreich: $RUN_URL"
+            gh issue close "$issue_number" --reason completed
+          fi

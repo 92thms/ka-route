@@ -1,3 +1,0 @@
-[submodule "api/ebay-kleinanzeigen-api"]
-	path = api/ebay-kleinanzeigen-api
-	url = https://github.com/DanielWTE/ebay-kleinanzeigen-api
