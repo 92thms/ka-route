@@ -7,6 +7,10 @@
 >
 > Das Repository erteilt keine Erlaubnis zum automatisierten Zugriff auf Dienste oder Inhalte Dritter. Wer die Software betreibt, ist selbst dafür verantwortlich, vorab erforderliche Zustimmungen einzuholen und die jeweils geltenden Nutzungsbedingungen sowie gesetzlichen Vorgaben einzuhalten.
 
+## Demo
+
+![Routensuche und Ergebnisdarstellung](docs/demo.gif)
+
 ## Funktionen
 
 - Routenberechnung via OpenRouteService (ORS)
